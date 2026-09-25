@@ -5,9 +5,14 @@ from sqlalchemy import pool
 
 from alembic import context
 
+from app.core.config import settings
+from app.models.base import Base
+import app.models  # noqa: F401 - registers model metadata
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -18,7 +23,7 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = None
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -38,12 +43,13 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    # url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=settings.database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
     )
 
     with context.begin_transaction():
@@ -64,8 +70,17 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        if settings.database_url.startswith("sqlite"):
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+            # SQLAlchemy 2.x starts an implicit transaction for PRAGMA statements.
+            # Commit it before Alembic manages its own migration transaction.
+            connection.commit()
+
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection, 
+            target_metadata=target_metadata,
+            compare_type=True,
         )
 
         with context.begin_transaction():
