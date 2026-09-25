@@ -15,7 +15,7 @@ from app.services.enrollment_service import create_enrollment_code, enroll_devic
 router = APIRouter()
 
 @router.post(
-    "/children/{child}/enrollment",
+    "/children/{child_id}/enrollment",
     response_model=EnrollmentCodeResponse,
     status_code=status.HTTP_201_CREATED,
 )
