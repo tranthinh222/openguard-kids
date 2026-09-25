@@ -12,6 +12,3 @@ class HeartbeatResponse(BaseModel):
     policy_version: int
     policy_update_available: bool
     commands: list[dict] = []
-
-
-
