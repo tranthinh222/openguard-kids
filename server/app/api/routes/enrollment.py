@@ -1,3 +1,5 @@
+from datetime import timezone
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
@@ -29,7 +31,11 @@ def create_code(
 
     return EnrollmentCodeResponse(
         code=code,
-        expires_at=record.expires_at
+        expires_at=(
+            record.expires_at.replace(tzinfo=timezone.utc)
+            if record.expires_at.tzinfo is None
+            else record.expires_at.astimezone(timezone.utc)
+        ),
     )
 
 @router.post(
