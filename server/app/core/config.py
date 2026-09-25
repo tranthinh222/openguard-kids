@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     device_refresh_token_expire_days: int = 30
     enrollment_code_expire_minutes: int = 10
 
+    web_session_expire_hours: int = 12
+    web_cookie_secure: bool = False
+
     login_max_failed_attempts: int = 5
     login_lock_minutes: int = 15
 
