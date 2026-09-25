@@ -19,3 +19,8 @@ class User(TimestampMixin, Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     children = relationship("Child", back_populates="parent", cascade="all, delete-orphan")
+    web_sessions = relationship(
+        "WebSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
