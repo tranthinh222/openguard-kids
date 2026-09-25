@@ -7,9 +7,19 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password, utc_now, verify_password
 from app.models.user import User
+import re
+
+PASSWORD_PATTERN = re.compile(
+    r"(?=.*[A-Z])"                        # At least 1 UPPERCASE character
+    r"(?=.*[0-9])"                        # At least 1 digit
+    r"(?=.*[!-/:-@\[-`{-~])"              # At least one special ASCII character
+    r"[\x21-\x7E]{10,128}"                # Printable ASCII character without spaces
+)
 
 def register_parent(db: Session, email: str, password: str) -> User:
+    validate_password(password)
     normalized_email = email.strip().lower()
+
 
     existing = db.scalar(select(User).where(User.email == normalized_email))
     if existing:
@@ -28,6 +38,8 @@ def register_parent(db: Session, email: str, password: str) -> User:
 
 def login_parent(db: Session, email: str, password: str) -> tuple[str, int]:
     normalized_email = email.strip().lower()
+    validate_password(password)
+    
     user = db.scalar(select(User).where(User.email == normalized_email))
 
     if user is None:
@@ -61,3 +73,14 @@ def login_parent(db: Session, email: str, password: str) -> tuple[str, int]:
     )
 
     return token, settings.parent_access_token_expire_minutes * 60
+
+def validate_password(password: str) -> None:
+    if PASSWORD_PATTERN.fullmatch(password) is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Password must contain between 10 and 128 characters, "
+                "has at least 1 UPPERCASE, 1 digit, and 1 special character; "
+                "only printable ASCIIs are allowed, no spaces."
+            )
+        )
