@@ -28,9 +28,9 @@ def create_enrollment_code(db: Session, parent_id: str, child: Child) -> tuple[s
         expires_at=utc_now() + timedelta(minutes=settings.enrollment_code_expire_minutes),
     )
 
-    db.add(code)
+    db.add(record)
     db.commit()
-    db.refresh(code)
+    db.refresh(record)
 
     return code, record
 
@@ -48,7 +48,7 @@ def enroll_device(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid enrollment code")
 
     if record.used_at is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enrollment code already used")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Enrollment code already used")
 
     if record.expires_at < now:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enrollment code expired")
@@ -56,7 +56,7 @@ def enroll_device(
     device = Device(
         child_id=record.child_id,
         device_name=device_name,
-        fingerprint=hash_device_fingerprint(fingerprint),
+        fingerprint_hash=hash_device_fingerprint(fingerprint),
         status="active",
         current_policy_version=0,
     )
