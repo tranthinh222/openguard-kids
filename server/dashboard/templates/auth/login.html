@@ -1,0 +1,59 @@
+{% extends "base.html" %} {% block title %}Đăng nhập · OpenGuard Kids{% endblock
+%} {% block content %}
+<div class="row justify-content-center align-items-center login-shell">
+	<div class="col-12 col-sm-9 col-md-6 col-lg-4 col-xl-3">
+		<div class="text-center mb-4">
+			<div class="brand-mark mx-auto mb-3">
+				<i class="bi bi-shield-check"></i>
+			</div>
+			<h1 class="h3 mb-2">OpenGuard Kids</h1>
+			<p class="text-secondary mb-0">
+				Bảng điều khiển dành cho phụ huynh
+			</p>
+		</div>
+		<div class="card border-0 shadow-sm">
+			<div class="card-body p-4">
+				<div
+					id="login-error"
+					class="alert alert-danger d-none"
+					role="alert"
+				></div>
+				<form id="login-form" novalidate>
+					<div class="mb-3">
+						<label class="form-label" for="email">Email</label>
+						<input
+							class="form-control"
+							id="email"
+							type="email"
+							required
+							autocomplete="email"
+						/>
+					</div>
+					<div class="mb-4">
+						<label class="form-label" for="password"
+							>Mật khẩu</label
+						>
+						<input
+							class="form-control"
+							id="password"
+							type="password"
+							required
+							autocomplete="current-password"
+						/>
+					</div>
+					<button
+						id="login-button"
+						class="btn btn-primary w-100"
+						type="submit"
+					>
+						Đăng nhập
+					</button>
+				</form>
+			</div>
+		</div>
+		<p class="text-center small text-secondary mt-3 mb-0">
+			Công cụ đồng hành, không phải phần mềm theo dõi lén.
+		</p>
+	</div>
+</div>
+{% endblock %}

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="vi">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{% block title %}OpenGuard Kids{% endblock %}</title>
+		<link
+			rel="icon"
+			type="image/svg+xml"
+			href="../static/assets/logo.png"
+		/>
+		<link
+			href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+			rel="stylesheet"
+		/>
+		<link
+			href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+			rel="stylesheet"
+		/>
+		<link href="../static/css/app.css" rel="stylesheet" />
+		<script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+	</head>
+	<body
+		data-page="{{ page_name|default('') }}"
+		{%
+		if
+		child_id
+		is
+		defined
+		%}data-child-id="{{ child_id }}"
+		{%
+		endif
+		%}
+		{%
+		if
+		login_csrf
+		is
+		defined
+		%}data-login-csrf="{{ login_csrf }}"
+		{%
+		endif
+		%}
+	>
+		{% if show_nav %}
+		<nav class="navbar navbar-expand-lg bg-white border-bottom sticky-top">
+			<div class="container-fluid px-lg-4">
+				<a class="navbar-brand fw-semibold" href="/dashboard">
+					<i class="bi bi-shield-check me-2"></i>OpenGuard Kids
+				</a>
+				<button
+					class="navbar-toggler"
+					type="button"
+					data-bs-toggle="collapse"
+					data-bs-target="#mainNav"
+					aria-controls="mainNav"
+					aria-expanded="false"
+					aria-label="Mở menu"
+				>
+					<span class="navbar-toggler-icon"></span>
+				</button>
+				<div class="collapse navbar-collapse" id="mainNav">
+					<ul class="navbar-nav me-auto ms-lg-4">
+						<li class="nav-item">
+							<a class="nav-link" href="/dashboard">Tổng quan</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="/children">Trẻ em</a>
+						</li>
+						<li class="nav-item">
+							<span class="nav-link disabled">Chính sách</span>
+						</li>
+						<li class="nav-item">
+							<span class="nav-link disabled">Yêu cầu</span>
+						</li>
+						<li class="nav-item">
+							<span class="nav-link disabled">Báo cáo</span>
+						</li>
+					</ul>
+					<div class="d-flex align-items-center gap-3 mt-3 mt-lg-0">
+						<span id="parent-email" class="text-secondary small"
+							>Đang tải...</span
+						>
+						<button
+							id="logout-button"
+							class="btn btn-outline-secondary btn-sm"
+							type="button"
+						>
+							Đăng xuất
+						</button>
+					</div>
+				</div>
+			</div>
+		</nav>
+		{% endif %}
+
+		<main class="container-fluid px-3 px-lg-4 py-4">
+			<div id="global-alert" class="d-none alert" role="alert"></div>
+			{% block content %}{% endblock %}
+		</main>
+
+		<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+		<script type="module" src="/static/js/app.js"></script>
+	</body>
+</html>

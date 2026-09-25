@@ -1,0 +1,58 @@
+{% extends "base.html" %} {% block title %}Thêm trẻ · OpenGuard Kids{% endblock
+%} {% block content %}
+<div class="row justify-content-center">
+	<div class="col-12 col-lg-7 col-xl-5">
+		<a class="text-decoration-none small" href="/children"
+			><i class="bi bi-arrow-left me-1"></i>Quay lại</a
+		>
+		<h1 class="h3 mt-3 mb-1">Thêm trẻ</h1>
+		<p class="text-secondary mb-4">
+			Chỉ nhập thông tin tối thiểu cần thiết cho việc quản lý thiết bị.
+		</p>
+		<div class="card border-0 shadow-sm">
+			<div class="card-body p-4">
+				<div
+					id="child-create-error"
+					class="alert alert-danger d-none"
+					role="alert"
+				></div>
+				<form id="child-create-form" novalidate>
+					<div class="mb-3">
+						<label class="form-label" for="display_name"
+							>Tên hiển thị</label
+						>
+						<input
+							class="form-control"
+							id="display_name"
+							maxlength="100"
+							required
+						/>
+					</div>
+					<div class="mb-4">
+						<label class="form-label" for="birth_year"
+							>Năm sinh
+							<span class="text-secondary"
+								>(không bắt buộc)</span
+							></label
+						>
+						<input
+							class="form-control"
+							id="birth_year"
+							type="number"
+							min="2000"
+							max="2100"
+						/>
+					</div>
+					<button
+						id="child-create-button"
+						class="btn btn-primary"
+						type="submit"
+					>
+						Tạo hồ sơ
+					</button>
+				</form>
+			</div>
+		</div>
+	</div>
+</div>
+{% endblock %}
