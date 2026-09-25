@@ -54,7 +54,7 @@ def get_current_device(
     payload = _decode_bearer(credentials)
 
     if payload.get("type") != "device":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Deice token required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Device token required")
 
     device = db.get(Device, payload.get("sub"))
     if (
