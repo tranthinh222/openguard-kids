@@ -1,5 +1,15 @@
-from datetime import datetime
-from pydantic import BaseModel
+from datetime import datetime, timezone
+from typing import Annotated
+
+from pydantic import AfterValidator, BaseModel
+
+
+def as_utc(value: datetime) -> datetime:
+    # SQLite stores UTC timestamps without timezone information.
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+UTCDateTime = Annotated[datetime, AfterValidator(as_utc)]
 
 class DeviceRefreshRequest(BaseModel):
     refresh_token: str
@@ -14,6 +24,6 @@ class ParentDeviceResponse(BaseModel):
     child_id: str
     device_name: str
     status: str
-    last_seen_at: datetime | None
+    last_seen_at: UTCDateTime | None
     current_policy_version: int
     online: bool
