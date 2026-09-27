@@ -10,6 +10,15 @@ from app.web.templating import templates
 router = APIRouter()
 
 
+@router.get("/register", response_class=HTMLResponse)
+def register_page(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="auth/register.html",
+        context={"page_name": "register", "show_nav": False},
+    )
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     # This web route only serves the HTML shell. Actual authentication is
