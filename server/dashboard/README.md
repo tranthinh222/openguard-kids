@@ -19,7 +19,7 @@ Both account forms support password visibility controls, loading states and API 
 
 ## UI
 
-`templates/auth/layout.html` contains the shared login/registration layout. `static/css/app.css` defines the green/cream palette, responsive layouts and CSS family illustration. Reduced-motion preferences are respected. No external illustration assets are required.
+`templates/auth/layout.html` contains the shared login/registration layout. `static/css/app.css` defines the green/cream palette, responsive layouts and the animated CSS family illustration (floating hearts, blinking faces, staggered entrance). Reduced-motion preferences disable all animation. No external illustration assets are required.
 
 The design direction uses the supplied UI reference document and Google Family Link's family-oriented presentation as inspiration, without copying product assets or adding controls for unavailable features.
 

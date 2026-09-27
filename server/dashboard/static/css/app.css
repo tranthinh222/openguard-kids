@@ -612,9 +612,290 @@ body[data-page="register"] {
 		transform: translateY(0);
 	}
 }
-@media (min-width: 992px) {
-	.family-scene {
-		animation: enter 0.8s ease-out;
+
+/* Account page motion. Uses the individual translate/rotate/scale properties so
+   the static transforms above (tilts, centering, responsive scale) are kept. */
+.auth-story::before,
+.auth-story::after {
+	content: "";
+	position: absolute;
+	border-radius: 50%;
+	pointer-events: none;
+	animation: drift 18s ease-in-out infinite alternate;
+}
+.auth-story::before {
+	width: 260px;
+	height: 260px;
+	top: -90px;
+	right: -80px;
+	background: #e0ebd0;
+}
+.auth-story::after {
+	width: 200px;
+	height: 200px;
+	bottom: -80px;
+	left: -60px;
+	background: #f3efd9;
+	animation-duration: 22s;
+	animation-direction: alternate-reverse;
+}
+.auth-story > * {
+	position: relative;
+	z-index: 1;
+	animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+}
+.auth-story > :nth-child(2) {
+	animation-delay: 0.08s;
+}
+.auth-story > :nth-child(3) {
+	animation-delay: 0.16s;
+}
+.auth-story > :nth-child(4) {
+	animation-delay: 0.26s;
+}
+.auth-story > :nth-child(5) {
+	animation-delay: 0.36s;
+}
+.scene-orbit {
+	animation: breathe 6s ease-in-out infinite;
+}
+.scene-orbit::after {
+	content: "";
+	position: absolute;
+	inset: -34px;
+	border: 2px dashed #bfd2a8;
+	border-radius: 50%;
+	animation: spin 48s linear infinite;
+}
+.person-parent {
+	animation: bob 4.5s ease-in-out infinite;
+}
+.person-child {
+	transform-origin: 50% 100%;
+	animation:
+		bob 3.6s ease-in-out -1.2s infinite,
+		sway 5s ease-in-out infinite;
+}
+.person-head::before {
+	content: "";
+	position: absolute;
+	top: 30%;
+	left: 22%;
+	width: 56%;
+	height: 7px;
+	background:
+		radial-gradient(circle, #2e3b2f 3px, transparent 3.5px) 0 0 / 7px 7px no-repeat,
+		radial-gradient(circle, #2e3b2f 3px, transparent 3.5px) 100% 0 / 7px 7px no-repeat;
+	animation: blink 5s infinite;
+}
+.person-child .person-head::before {
+	animation-delay: 1.7s;
+}
+.scene-caption {
+	animation: float 5s ease-in-out infinite;
+}
+.scene-caption i {
+	display: inline-block;
+	animation: heartbeat 1.6s ease-in-out infinite;
+}
+.scene-shield {
+	animation: float 4.2s ease-in-out -2s infinite;
+}
+.scene-shield::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border: 2px solid #36724f;
+	border-radius: inherit;
+	opacity: 0;
+	animation: ripple 3s ease-out infinite;
+}
+.scene-spark {
+	animation: twinkle 3.2s ease-in-out infinite;
+}
+.spark-two {
+	animation-delay: -1.6s;
+}
+.leaf-one {
+	transform-origin: 50% 100%;
+	animation: leaf 4s ease-in-out infinite;
+}
+.leaf-two {
+	transform-origin: 50% 100%;
+	animation: leaf 4.6s ease-in-out -2s infinite;
+}
+.scene-heart {
+	position: absolute;
+	z-index: 2;
+	bottom: 110px;
+	color: #c87953;
+	font-size: 0.85rem;
+	opacity: 0;
+	animation: float-up 6s ease-out infinite;
+}
+.heart-one {
+	left: 150px;
+}
+.heart-two {
+	left: 190px;
+	font-size: 0.65rem;
+	animation-delay: 2s;
+}
+.heart-three {
+	left: 120px;
+	font-size: 0.7rem;
+	animation-delay: 4s;
+}
+.auth-form-heading,
+.auth-field,
+.auth-submit,
+.auth-alternate,
+.auth-reassurance {
+	animation: rise 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+}
+.auth-form-heading {
+	animation-delay: 0.05s;
+}
+.auth-field:nth-child(1) {
+	animation-delay: 0.12s;
+}
+.auth-field:nth-child(2) {
+	animation-delay: 0.19s;
+}
+.auth-field:nth-child(3) {
+	animation-delay: 0.26s;
+}
+.auth-submit {
+	animation-delay: 0.33s;
+}
+.auth-alternate,
+.auth-reassurance {
+	animation-delay: 0.4s;
+}
+.auth-switch a {
+	transition:
+		background-color 0.2s,
+		color 0.2s,
+		box-shadow 0.2s;
+}
+.auth-switch a:not([aria-current="page"]):hover {
+	color: #23583e;
+	background: #f6f9f3;
+}
+.auth-submit {
+	transition:
+		translate 0.2s,
+		box-shadow 0.2s;
+}
+.auth-submit:hover:not(:disabled) {
+	translate: 0 -1px;
+	box-shadow: 0 8px 18px #22634d2e;
+}
+.auth-submit i {
+	transition: translate 0.2s;
+}
+.auth-submit:hover:not(:disabled) i {
+	translate: 4px 0;
+}
+.password-rules li span {
+	transition: scale 0.2s;
+}
+.password-rules li.is-valid span {
+	scale: 1.25;
+}
+@keyframes rise {
+	from {
+		opacity: 0;
+		translate: 0 14px;
+	}
+}
+@keyframes drift {
+	to {
+		translate: -30px 24px;
+		scale: 1.12;
+	}
+}
+@keyframes breathe {
+	50% {
+		scale: 1.04;
+	}
+}
+@keyframes spin {
+	to {
+		rotate: 360deg;
+	}
+}
+@keyframes bob {
+	50% {
+		translate: 0 -6px;
+	}
+}
+@keyframes sway {
+	50% {
+		rotate: 4deg;
+	}
+}
+@keyframes blink {
+	0%,
+	92%,
+	100% {
+		scale: 1 1;
+	}
+	95% {
+		scale: 1 0.1;
+	}
+}
+@keyframes float {
+	50% {
+		translate: 0 -7px;
+	}
+}
+@keyframes heartbeat {
+	0%,
+	60%,
+	100% {
+		scale: 1;
+	}
+	15%,
+	40% {
+		scale: 1.25;
+	}
+}
+@keyframes ripple {
+	0% {
+		opacity: 0.45;
+		scale: 1;
+	}
+	100% {
+		opacity: 0;
+		scale: 1.35;
+	}
+}
+@keyframes twinkle {
+	50% {
+		opacity: 0.35;
+		scale: 0.7;
+		rotate: 45deg;
+	}
+}
+@keyframes leaf {
+	50% {
+		rotate: 9deg;
+	}
+}
+@keyframes float-up {
+	0% {
+		opacity: 0;
+		translate: 0 0;
+		scale: 0.6;
+	}
+	15% {
+		opacity: 0.9;
+	}
+	100% {
+		opacity: 0;
+		translate: 14px -120px;
+		scale: 1.1;
 	}
 }
 @media (max-width: 991.98px) {
