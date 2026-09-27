@@ -59,3 +59,29 @@ export function statusBadge(online) {
 	badge.textContent = online ? "Online" : "Offline";
 	return badge;
 }
+
+let toastTimeout;
+
+export function showToast(message, isError = false) {
+	const region = document.getElementById("toast-region");
+	clearTimeout(toastTimeout);
+	const toast = document.createElement("div");
+	toast.className = `app-toast${isError ? " app-toast-error" : ""}`;
+	const icon = document.createElement("i");
+	icon.className = isError ? "bi bi-exclamation-circle" : "bi bi-check-circle";
+	icon.setAttribute("aria-hidden", "true");
+	const text = document.createElement("span");
+	text.textContent = message;
+	const close = document.createElement("button");
+	close.type = "button";
+	close.className = "toast-dismiss";
+	close.setAttribute("aria-label", "Đóng thông báo");
+	close.textContent = "×";
+	close.addEventListener("click", () => {
+		clearTimeout(toastTimeout);
+		region.replaceChildren();
+	});
+	toast.append(icon, text, close);
+	region.replaceChildren(toast);
+	toastTimeout = setTimeout(() => region.replaceChildren(), 6000);
+}

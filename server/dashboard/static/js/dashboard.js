@@ -1,9 +1,15 @@
 import { apiRequest, formatDateTime } from "./api.js";
 import { statusBadge } from "./common.js";
+import { startLiveRefresh } from "./live-refresh.js";
 
-export async function initDashboardPage() {
-	const summary = await apiRequest("/api/v1/dashboard/summary");
+export function initDashboardPage() {
+	return startLiveRefresh(
+		(signal) => apiRequest("/api/v1/dashboard/summary", { signal, cache: "no-store" }),
+		renderSummary,
+	);
+}
 
+function renderSummary(summary) {
 	document.getElementById("children-count").textContent =
 		summary.children_count;
 	document.getElementById("device-count").textContent = summary.device_count;

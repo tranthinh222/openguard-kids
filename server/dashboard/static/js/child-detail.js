@@ -1,5 +1,6 @@
 import { apiRequest, apiWrite, formatDateTime } from "./api.js";
-import { setButtonBusy, statusBadge } from "./common.js";
+import { startLiveRefresh } from "./live-refresh.js";
+import { setButtonBusy, statusBadge, showToast } from "./common.js";
 
 function renderDevices(devices) {
 	const container = document.getElementById("child-devices");
@@ -45,9 +46,35 @@ function renderDevices(devices) {
 	container.append(wrapper);
 }
 
+let enrollmentInterval;
+
+async function copyEnrollmentCode(code) {
+	if (navigator.clipboard?.writeText) {
+		await navigator.clipboard.writeText(code);
+		return;
+	}
+	// Support browsers without Clipboard API, including local HTTP on a phone.
+	const previousFocus = document.activeElement;
+	const field = document.createElement("textarea");
+	field.value = code;
+	field.readOnly = true;
+	field.className = "clipboard-fallback";
+	document.body.append(field);
+	try {
+		field.select();
+		field.setSelectionRange(0, code.length);
+		if (!document.execCommand("copy")) throw new Error("Clipboard unavailable");
+	} finally {
+		field.remove();
+		previousFocus?.focus({ preventScroll: true });
+	}
+}
+
 function renderEnrollment(code, expiresAt) {
+	clearInterval(enrollmentInterval);
 	const panel = document.getElementById("enrollment-panel");
 	panel.replaceChildren();
+	panel.className = "mt-3";
 
 	const box = document.createElement("div");
 	box.className = "enrollment-code-panel";
@@ -57,12 +84,35 @@ function renderEnrollment(code, expiresAt) {
 	const codeEl = document.createElement("div");
 	codeEl.className = "enrollment-code";
 	codeEl.textContent = code;
+	const codeRow = document.createElement("div");
+	codeRow.className = "enrollment-code-row";
+	const copyButton = document.createElement("button");
+	copyButton.type = "button";
+	copyButton.className = "btn btn-outline-primary enrollment-copy";
+	copyButton.setAttribute("aria-label", "Sao chép mã ghép đôi");
+	copyButton.title = "Sao chép mã ghép đôi";
+	const copyIcon = document.createElement("i");
+	copyIcon.className = "bi bi-copy";
+	copyIcon.setAttribute("aria-hidden", "true");
+	copyButton.append(copyIcon);
+	copyButton.addEventListener("click", async () => {
+		copyButton.disabled = true;
+		try {
+			await copyEnrollmentCode(code);
+			showToast("Đã sao chép mã ghép đôi. Bạn có thể dán mã trên thiết bị của trẻ.");
+		} catch {
+			showToast("Không thể sao chép tự động. Bạn có thể chọn mã và sao chép thủ công.", true);
+		} finally {
+			copyButton.disabled = Date.now() >= expiry;
+		}
+	});
+	codeRow.append(codeEl, copyButton);
 	const countdown = document.createElement("div");
 	countdown.className = "small mt-2";
 	countdown.textContent = "Hết hạn sau ";
 	const timer = document.createElement("strong");
 	countdown.append(timer);
-	box.append(label, codeEl, countdown);
+	box.append(label, codeRow, countdown);
 	panel.append(box);
 
 	const expiry = new Date(expiresAt).getTime();
@@ -71,7 +121,9 @@ function renderEnrollment(code, expiresAt) {
 		if (remaining <= 0) {
 			timer.textContent = "00:00";
 			box.classList.add("opacity-50");
-			clearInterval(interval);
+			copyButton.disabled = true;
+			copyButton.title = "Mã ghép đôi đã hết hạn";
+			clearInterval(enrollmentInterval);
 			return;
 		}
 		const total = Math.ceil(remaining / 1000);
@@ -79,17 +131,40 @@ function renderEnrollment(code, expiresAt) {
 		const seconds = total % 60;
 		timer.textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 	};
-	const interval = setInterval(tick, 1000);
+	enrollmentInterval = setInterval(tick, 1000);
 	tick();
+}
+
+function renderEnrollmentResult(state) {
+	clearInterval(enrollmentInterval);
+	const panel = document.getElementById("enrollment-panel");
+	panel.replaceChildren();
+	panel.className = "mt-3";
+	const notice = document.createElement("div");
+	notice.className = `enrollment-result alert ${state === "used" ? "alert-success" : "alert-warning"} mb-0`;
+	notice.setAttribute("role", "status");
+	const icon = document.createElement("i");
+	icon.className = state === "used" ? "bi bi-check-circle me-2" : "bi bi-clock me-2";
+	icon.setAttribute("aria-hidden", "true");
+	const title = document.createElement("strong");
+	title.textContent = state === "used" ? "Ghép đôi thành công!" : "Mã ghép đôi đã hết hạn.";
+	const description = document.createElement("p");
+	description.className = "small mt-2 mb-0";
+	description.textContent = state === "used"
+		? "Thiết bị đã được liên kết với trẻ. Bạn có thể tạo mã mới để ghép thêm thiết bị."
+		: "Hãy tạo mã mới để tiếp tục ghép thiết bị.";
+	notice.append(icon, title, description);
+	panel.append(notice);
 }
 
 export async function initChildDetailPage() {
 	const childId = document.body.dataset.childId;
 	const encodedId = encodeURIComponent(childId);
+	let activeEnrollmentId = null;
+	let previousDevices;
 
-	const [child, devices, policy] = await Promise.all([
+	const [child, policy] = await Promise.all([
 		apiRequest(`/api/v1/children/${encodedId}`),
-		apiRequest(`/api/v1/children/${encodedId}/devices`),
 		apiRequest(`/api/v1/children/${encodedId}/policy`),
 	]);
 
@@ -97,7 +172,31 @@ export async function initChildDetailPage() {
 	document.title = `${child.display_name} · OpenGuard Kids`;
 	document.getElementById("policy-version").textContent =
 		`v${policy.version}`;
-	renderDevices(devices);
+	startLiveRefresh(
+		async (signal) => {
+			const enrollmentId = activeEnrollmentId;
+			const options = { signal, cache: "no-store" };
+			const [devices, enrollment] = await Promise.all([
+				apiRequest(`/api/v1/children/${encodedId}/devices`, options),
+				enrollmentId
+					? apiRequest(`/api/v1/children/${encodedId}/enrollment/${encodeURIComponent(enrollmentId)}`, options)
+					: Promise.resolve(null),
+			]);
+			return { devices, enrollment };
+		},
+		({ devices, enrollment }) => {
+			const snapshot = JSON.stringify(devices);
+			if (snapshot !== previousDevices) {
+				renderDevices(devices);
+				previousDevices = snapshot;
+			}
+			// Ignore a late response for a code that has already been replaced.
+			if (enrollment?.enrollment_id === activeEnrollmentId && ["used", "expired"].includes(enrollment.status)) {
+				activeEnrollmentId = null;
+				renderEnrollmentResult(enrollment.status);
+			}
+		},
+	);
 
 	const button = document.getElementById("create-enrollment-button");
 	button.addEventListener("click", async () => {
@@ -107,8 +206,11 @@ export async function initChildDetailPage() {
 				`/api/v1/children/${encodedId}/enrollment`,
 				"POST",
 			);
+			activeEnrollmentId = enrollment.enrollment_id;
 			renderEnrollment(enrollment.code, enrollment.expires_at);
 		} catch (error) {
+			activeEnrollmentId = null;
+			clearInterval(enrollmentInterval);
 			const panel = document.getElementById("enrollment-panel");
 			panel.textContent = error.message;
 			panel.className = "mt-3 alert alert-danger";

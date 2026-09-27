@@ -74,7 +74,11 @@ export async function apiError(response) {
 	let message = `HTTP ${response.status}`;
 	try {
 		const body = await response.json();
-		if (typeof body.detail === "string") {
+		if (Array.isArray(body.errors) && body.errors.length) {
+            message = body.errors.map((item) => item.message || "Dữ liệu không hợp lệ").join("; ");
+        } else if (typeof body.message === "string") {
+            message = body.message;
+        } else if (typeof body.detail === "string") {
 			message = body.detail;
 		} else if (Array.isArray(body.detail)) {
 			message = body.detail

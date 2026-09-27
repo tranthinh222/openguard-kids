@@ -1,7 +1,14 @@
 import { apiError, getSession } from "./api.js";
 import { setButtonBusy } from "./common.js";
 
+import { initPasswordToggles, authErrorMessage } from "./auth-ui.js";
+
 export async function initLoginPage() {
+    initPasswordToggles();
+    if (new URLSearchParams(window.location.search).get("registered") === "1") {
+        document.getElementById("login-success").classList.remove("d-none");
+        window.history.replaceState(null, "", "/login");
+    }
 	const existing = await getSession(true);
 	if (existing) {
 		window.location.href = "/dashboard";
@@ -12,9 +19,11 @@ export async function initLoginPage() {
 	const button = document.getElementById("login-button");
 	const errorBox = document.getElementById("login-error");
 	const loginCsrf = document.body.dataset.loginCsrf;
+	let submitting = false;
 
 	form.addEventListener("submit", async (event) => {
 		event.preventDefault();
+		if (submitting || !form.reportValidity()) return;
 		errorBox.classList.add("d-none");
 
 		const email = document.getElementById("email").value.trim();
@@ -26,6 +35,7 @@ export async function initLoginPage() {
 			return;
 		}
 
+		submitting = true;
 		setButtonBusy(button, true, "Đang đăng nhập...");
 		try {
 			const response = await fetch("/api/v1/auth/login", {
@@ -43,8 +53,10 @@ export async function initLoginPage() {
 			await response.json();
 			window.location.href = "/dashboard";
 		} catch (error) {
-			errorBox.textContent = error.message;
+			errorBox.textContent = authErrorMessage(error);
 			errorBox.classList.remove("d-none");
+			errorBox.focus();
+			submitting = false;
 			setButtonBusy(button, false);
 		}
 	});

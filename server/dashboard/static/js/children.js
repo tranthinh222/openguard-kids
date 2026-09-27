@@ -1,4 +1,5 @@
 import { apiRequest } from "./api.js";
+import { startLiveRefresh } from "./live-refresh.js";
 
 function childCard(item) {
 	const column = document.createElement("div");
@@ -49,8 +50,15 @@ function childCard(item) {
 	return column;
 }
 
-export async function initChildrenPage() {
-	const children = await apiRequest("/api/v1/children");
+export function initChildrenPage() {
+	return startLiveRefresh(
+		(signal) => apiRequest("/api/v1/children", { signal, cache: "no-store" }),
+		renderChildren,
+	);
+}
+
+function renderChildren(children) {
+	const focusedHref = document.activeElement?.closest("#children-grid a")?.getAttribute("href");
 	const grid = document.getElementById("children-grid");
 	grid.replaceChildren();
 
@@ -74,4 +82,9 @@ export async function initChildrenPage() {
 	}
 
 	children.forEach((child) => grid.append(childCard(child)));
+	if (focusedHref) {
+		Array.from(grid.querySelectorAll("a"))
+			.find((link) => link.getAttribute("href") === focusedHref)
+			?.focus({ preventScroll: true });
+	}
 }
