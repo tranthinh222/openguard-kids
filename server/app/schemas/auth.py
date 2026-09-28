@@ -19,3 +19,8 @@ class ParentTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+class ParentSessionResponse(BaseModel):
+    authenticated: bool = True
+    user: UserResponse
+    csrf_token: str

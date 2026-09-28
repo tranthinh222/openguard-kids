@@ -8,7 +8,7 @@ from app.models.base import Base, TimestampMixin, uuid4_str
 class Policy(TimestampMixin, Base):
     __tablename__ = "policies"
     __table_args__ = (
-        UniqueConstraint("child_id", "version", name="uq_policy_child_version")
+        UniqueConstraint("child_id", "version", name="uq_policy_child_version"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)

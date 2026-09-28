@@ -1,0 +1,54 @@
+{% extends "base.html" %} {% block title %}Tổng quan · OpenGuard Kids{% endblock
+%} {% block content %}
+<div
+	class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4"
+>
+	<div>
+		<h1 class="h3 mb-1">Tổng quan</h1>
+		<p class="text-secondary mb-0">
+			Theo dõi trạng thái ghép đôi và kết nối của các thiết bị.
+		</p>
+	</div>
+	<a class="btn btn-primary" href="/children/new"
+		><i class="bi bi-person-plus me-2"></i>Thêm trẻ</a
+	>
+</div>
+
+<div class="row g-3 mb-4">
+	<div class="col-6 col-xl-3">
+		<div class="metric-card">
+			<span>Trẻ em</span><strong id="children-count">—</strong>
+		</div>
+	</div>
+	<div class="col-6 col-xl-3">
+		<div class="metric-card">
+			<span>Thiết bị</span><strong id="device-count">—</strong>
+		</div>
+	</div>
+	<div class="col-6 col-xl-3">
+		<div class="metric-card">
+			<span>Đang online</span><strong id="online-count">—</strong>
+		</div>
+	</div>
+	<div class="col-6 col-xl-3">
+		<div class="metric-card">
+			<span>Offline</span><strong id="offline-count">—</strong>
+		</div>
+	</div>
+</div>
+
+<div class="card border-0 shadow-sm">
+	<div
+		class="card-header bg-white border-0 pt-4 px-4 d-flex justify-content-between align-items-center"
+	>
+		<h2 class="h5 mb-0">Thiết bị gần đây</h2>
+		<a class="small text-decoration-none" href="/children">Xem trẻ em</a>
+	</div>
+	<div id="recent-devices" class="card-body p-0">
+		<div class="loading-state">
+			<div class="spinner-border spinner-border-sm" role="status"></div>
+			<span>Đang tải dữ liệu...</span>
+		</div>
+	</div>
+</div>
+{% endblock %}

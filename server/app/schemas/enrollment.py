@@ -1,10 +1,17 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 class EnrollmentCodeResponse(BaseModel):
+    enrollment_id: str
     code: str
     expires_at: datetime
+
+class EnrollmentStatusResponse(BaseModel):
+    enrollment_id: str
+    status: Literal["pending", "used", "expired"]
+
 
 class AgentEnrollRequest(BaseModel):
     code: str = Field(min_length=8, max_length=8)

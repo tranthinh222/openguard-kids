@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kiến trúc OpenGuard Kids</title>
+  <style>
+    :root {
+      --ink: #162033;
+      --muted: #667085;
+      --line: #98a2b3;
+      --page: #eef2f7;
+      --parent: #e9f7ef;
+      --parent-line: #28a66a;
+      --server: #eef4ff;
+      --server-line: #3972d5;
+      --agent: #fff4e6;
+      --agent-line: #e98224;
+      --data: #f4efff;
+      --data-line: #805ad5;
+      --danger: #fff0f0;
+      --danger-line: #d64545;
+      --zoom: 1;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--page);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      border-bottom: 1px solid #d0d5dd;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+    }
+
+    .toolbar strong { margin-right: auto; }
+
+    button {
+      padding: 8px 12px;
+      border: 1px solid #c8d0dc;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:hover { background: #f8fafc; }
+
+    .viewport {
+      overflow: auto;
+      min-height: calc(100vh - 58px);
+      padding: 30px;
+    }
+
+    .canvas {
+      width: 1880px;
+      min-height: 1080px;
+      margin: 0 auto;
+      padding: 34px;
+      border: 1px solid #d0d5dd;
+      border-radius: 22px;
+      background:
+        linear-gradient(#e9edf3 1px, transparent 1px),
+        linear-gradient(90deg, #e9edf3 1px, transparent 1px),
+        #fff;
+      background-size: 24px 24px;
+      box-shadow: 0 16px 40px rgba(16, 24, 40, 0.12);
+      zoom: var(--zoom);
+    }
+
+    header { text-align: center; }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+      letter-spacing: -0.03em;
+    }
+
+    header p {
+      margin: 8px 0 20px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .legend {
+      display: flex;
+      justify-content: center;
+      gap: 22px;
+      margin-bottom: 24px;
+      color: #475467;
+      font-size: 14px;
+    }
+
+    .legend span::before {
+      display: inline-block;
+      width: 22px;
+      margin-right: 7px;
+      border-top: 3px solid var(--server-line);
+      content: "";
+      vertical-align: middle;
+    }
+
+    .legend .realtime::before { border-top: 3px dashed var(--danger-line); }
+    .legend .local::before { border-top-color: var(--line); }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: 330px 155px 510px 175px 570px;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .zone {
+      position: relative;
+      padding: 18px;
+      border: 3px solid;
+      border-radius: 18px;
+      box-shadow: 0 8px 20px rgba(16, 24, 40, 0.08);
+    }
+
+    .zone.parent { border-color: var(--parent-line); background: var(--parent); }
+    .zone.server { border-color: var(--server-line); background: var(--server); }
+    .zone.agent { border-color: var(--agent-line); background: var(--agent); }
+
+    .zone-title {
+      margin: 0 0 4px;
+      font-size: 21px;
+      text-align: center;
+    }
+
+    .zone-subtitle {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .stack { display: grid; gap: 10px; }
+
+    .card {
+      padding: 12px;
+      border: 1.5px solid #c8d0dc;
+      border-radius: 11px;
+      background: #fff;
+      box-shadow: 0 2px 5px rgba(16, 24, 40, 0.05);
+    }
+
+    .card h3 {
+      margin: 0 0 7px;
+      font-size: 15px;
+    }
+
+    .card p, .card li {
+      color: #475467;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .card p { margin: 0; }
+    .card ul { margin: 0; padding-left: 18px; }
+
+    .api-grid, .module-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    .pill {
+      padding: 9px 8px;
+      border: 1px solid #b7c8e8;
+      border-radius: 9px;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .service-shell {
+      margin-top: 12px;
+      padding: 13px;
+      border: 2px solid var(--agent-line);
+      border-radius: 13px;
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    .service-shell > h3 {
+      margin: 0 0 3px;
+      font-size: 16px;
+      text-align: center;
+    }
+
+    .service-shell > p {
+      margin: 0 0 11px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .store {
+      margin-top: 12px;
+      padding: 14px;
+      border: 2px solid var(--data-line);
+      border-radius: 50% / 18%;
+      background: var(--data);
+      text-align: center;
+    }
+
+    .store strong { display: block; margin-bottom: 4px; }
+    .store small { color: #5d4a8a; line-height: 1.4; }
+
+    .connector {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 22px;
+      min-height: 700px;
+    }
+
+    .flow {
+      position: relative;
+      padding: 11px 5px;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .flow::before {
+      display: block;
+      width: 100%;
+      margin-bottom: 8px;
+      border-top: 4px solid var(--server-line);
+      content: "";
+    }
+
+    .flow::after {
+      position: absolute;
+      top: 5px;
+      right: -2px;
+      width: 10px;
+      height: 10px;
+      border-top: 4px solid var(--server-line);
+      border-right: 4px solid var(--server-line);
+      content: "";
+      transform: rotate(45deg);
+    }
+
+    .flow.bidirectional span::before {
+      position: absolute;
+      top: 5px;
+      left: -2px;
+      width: 10px;
+      height: 10px;
+      border-bottom: 4px solid var(--server-line);
+      border-left: 4px solid var(--server-line);
+      content: "";
+      transform: rotate(45deg);
+    }
+
+    .flow.realtime::before { border-top: 4px dashed var(--danger-line); }
+    .flow.realtime::after { border-color: var(--danger-line); }
+    .flow.realtime span::before { border-color: var(--danger-line); }
+
+    .protocol {
+      display: inline-block;
+      margin-bottom: 4px;
+      padding: 4px 7px;
+      border-radius: 999px;
+      background: #fff;
+      color: #344054;
+      box-shadow: 0 1px 3px rgba(16, 24, 40, 0.12);
+    }
+
+    .week-one {
+      margin-top: 24px;
+      padding: 14px 18px;
+      border: 2px solid #12a150;
+      border-radius: 12px;
+      background: #ecfdf3;
+      color: #166534;
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .week-one strong { color: #14532d; }
+
+    @media print {
+      @page { size: A3 landscape; margin: 8mm; }
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .viewport { padding: 0; overflow: visible; }
+      .canvas { width: 100%; min-height: auto; border: 0; box-shadow: none; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="toolbar" aria-label="Điều khiển sơ đồ">
+    <strong>Kiến trúc OpenGuard Kids</strong>
+    <button type="button" onclick="changeZoom(-0.1)">Thu nhỏ</button>
+    <button type="button" onclick="fitToScreen()">Vừa màn hình</button>
+    <button type="button" onclick="resetZoom()">100%</button>
+    <button type="button" onclick="changeZoom(0.1)">Phóng to</button>
+    <button type="button" onclick="window.print()">In / Xuất PDF</button>
+  </nav>
+
+  <main class="viewport">
+    <section class="canvas" aria-label="Sơ đồ kiến trúc OpenGuard Kids">
+      <header>
+        <h1>KIẾN TRÚC HỆ THỐNG OPENGUARD KIDS</h1>
+        <p>Kiến trúc triển khai · thành phần · công nghệ · giao thức · kho dữ liệu</p>
+      </header>
+
+      <div class="legend">
+        <span>HTTPS / TLS 1.2+</span>
+        <span class="realtime">WebSocket lệnh khẩn</span>
+        <span class="local">Giao tiếp cục bộ</span>
+      </div>
+
+      <div class="architecture">
+        <section class="zone parent">
+          <h2 class="zone-title">WEB DASHBOARD</h2>
+          <p class="zone-subtitle">Client / Presentation Layer</p>
+          <div class="stack">
+            <article class="card">
+              <h3>Thiết bị truy cập</h3>
+              <p>Trình duyệt desktop hoặc mobile của phụ huynh.</p>
+            </article>
+            <article class="card">
+              <h3>Công nghệ giao diện</h3>
+              <p>Jinja2 + HTMX hoặc React nhẹ theo lựa chọn của nhóm.</p>
+            </article>
+            <article class="card">
+              <h3>HTTP Client</h3>
+              <p>Gửi HTTPS request, nhận HTML/JSON và quản lý session cookie.</p>
+            </article>
+            <article class="card">
+              <h3>Ranh giới triển khai</h3>
+              <p>Không truy cập database trực tiếp; mọi dữ liệu đi qua FastAPI.</p>
+            </article>
+          </div>
+        </section>
+
+        <div class="connector" aria-label="Kết nối Dashboard với Server">
+          <div class="flow bidirectional">
+            <span></span>
+            <div class="protocol">HTTPS · REST</div>
+            HTML / JSON · Session cookie
+          </div>
+        </div>
+
+        <section class="zone server">
+          <h2 class="zone-title">OGK SERVER</h2>
+          <p class="zone-subtitle">Application Server · LAN hoặc VPS lab</p>
+
+          <article class="card">
+            <h3>Transport Layer</h3>
+            <p>Uvicorn ASGI → FastAPI routers · TLS 1.2+ · rate limit · phân trang.</p>
+          </article>
+
+          <div class="api-grid" style="margin-top: 10px">
+            <div class="pill">/auth</div>
+            <div class="pill">/enroll</div>
+            <div class="pill">/policy</div>
+            <div class="pill">/heartbeat</div>
+            <div class="pill">/events</div>
+            <div class="pill">/commands</div>
+            <div class="pill">/reports</div>
+            <div class="pill">/audit</div>
+          </div>
+
+          <div class="stack" style="margin-top: 12px">
+            <article class="card">
+              <h3>Application Services</h3>
+              <p>Auth & Enrollment · Device & Heartbeat · Policy · Event · Command · Report · Audit.</p>
+            </article>
+            <article class="card">
+              <h3>Security Layer</h3>
+              <p>Parent/device token · HMAC policy · kiểm tra ownership · CSRF · audit log.</p>
+            </article>
+            <article class="card">
+              <h3>Persistence Layer</h3>
+              <p>SQLAlchemy ORM · Alembic migration · repository/query ownership.</p>
+            </article>
+          </div>
+
+          <div class="store">
+            <strong>SQLITE · WAL MODE</strong>
+            <small>user · child · device · token · policy · event · command · audit</small>
+          </div>
+        </section>
+
+        <div class="connector" aria-label="Kết nối Server với Agent">
+          <div class="flow bidirectional">
+            <span></span>
+            <div class="protocol">HTTPS · TLS 1.2+</div>
+            Enrollment · heartbeat 60s · policy · event batch
+          </div>
+          <div class="flow bidirectional realtime">
+            <span></span>
+            <div class="protocol">WebSocket</div>
+            Kênh lệnh thời gian thực · độ trễ dưới 5 giây
+          </div>
+        </div>
+
+        <section class="zone agent">
+          <h2 class="zone-title">OGK AGENT · WINDOWS 10/11</h2>
+          <p class="zone-subtitle">Hai tiến trình tách biệt theo mức đặc quyền</p>
+
+          <article class="card">
+            <h3>Tray UI Process · User Session</h3>
+            <p>Tiến trình giao diện chạy với quyền người dùng, luôn hiển thị khi agent hoạt động.</p>
+            <div class="module-grid" style="margin-top: 10px">
+              <div class="pill">UI Renderer</div>
+              <div class="pill">Local IPC Client</div>
+            </div>
+          </article>
+
+          <div class="flow bidirectional" style="min-height: 66px">
+            <span></span>
+            <div class="protocol">Named Pipe hoặc HTTP 127.0.0.1 + local token</div>
+          </div>
+
+          <section class="service-shell">
+            <h3>WINDOWS SERVICE · LOCALSYSTEM</h3>
+            <p>Python 3.11+ · pywin32 · psutil · SCM Recovery Options</p>
+            <div class="module-grid">
+              <div class="pill">Agent Core</div>
+              <div class="pill">Policy Enforcer</div>
+              <div class="pill">Screen-time Counter</div>
+              <div class="pill">App Controller</div>
+              <div class="pill">DNS Proxy 127.0.0.1:53</div>
+              <div class="pill">Heartbeat Client</div>
+              <div class="pill">Event Sync Worker</div>
+              <div class="pill">WebSocket Listener</div>
+            </div>
+          </section>
+
+          <div class="store">
+            <strong>LOCAL SQLITE · PROGRAMDATA</strong>
+            <small>Policy cache · quota state · event queue · ACL SYSTEM/Administrators</small>
+          </div>
+        </section>
+      </div>
+
+      <div class="week-one">
+        <strong>Khung kỹ thuật tuần 1:</strong>
+        Web Dashboard kết nối FastAPI → Server dùng SQLite → Agent enroll và gửi heartbeat mỗi 60 giây.
+        Các module thực thi bên trong Windows Service là kiến trúc mục tiêu cho tuần 2–4.
+      </div>
+    </section>
+  </main>
+
+  <script>
+    let zoom = 1;
+    let autoFit = true;
+
+    function applyZoom() {
+      document.documentElement.style.setProperty("--zoom", String(zoom));
+    }
+
+    function changeZoom(delta) {
+      autoFit = false;
+      zoom = Math.min(1.5, Math.max(0.5, Math.round((zoom + delta) * 10) / 10));
+      applyZoom();
+    }
+
+    function resetZoom() {
+      autoFit = false;
+      zoom = 1;
+      applyZoom();
+    }
+
+    function fitToScreen() {
+      autoFit = true;
+      const horizontalPadding = 60;
+      const canvasWidth = 1880;
+      const availableWidth = Math.max(320, window.innerWidth - horizontalPadding);
+      zoom = Math.min(1, Math.max(0.45, availableWidth / canvasWidth));
+      applyZoom();
+    }
+
+    window.addEventListener("DOMContentLoaded", fitToScreen);
+    window.addEventListener("resize", () => {
+      if (autoFit) {
+        fitToScreen();
+      }
+    });
+  </script>
+</body>
+</html>
