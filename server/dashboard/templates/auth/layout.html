@@ -1,0 +1,74 @@
+{% extends "base.html" %} {% block content %}
+<div class="auth-page">
+	<header class="auth-header">
+		<a class="auth-brand" href="/login"
+			><span class="brand-symbol" aria-hidden="true"
+				><i class="bi bi-shield-check"></i></span
+			>OpenGuard <span>Kids</span></a
+		>
+		<span class="auth-header-note"
+			><i class="bi bi-heart" aria-hidden="true"></i> Cùng con lớn lên
+			trong thế giới số</span
+		>
+	</header>
+	<div class="auth-layout">
+		<aside class="auth-story">
+			<span class="eyebrow">KẾT NỐI GIA ĐÌNH · NUÔI DƯỠNG NIỀM TIN</span>
+			<h1>
+				Một thế giới số.<br /><em>Cả nhà cùng <br />khám phá.</em>
+			</h1>
+			<p>
+				Mỗi bước con khám phá đều cần sự đồng hành. Bắt đầu từ những kết
+				nối nhỏ, xây dựng thói quen tốt cùng nhau.
+			</p>
+			<div class="family-scene" aria-hidden="true">
+				<div class="scene-orbit"></div>
+				<div class="scene-spark spark-one">✦</div>
+				<div class="scene-spark spark-two">✧</div>
+				<div class="scene-caption">
+					<i class="bi bi-heart-fill"></i> Luôn có nhau
+				</div>
+				<div class="family-person person-parent">
+					<div class="person-head"></div>
+					<div class="person-body"></div>
+				</div>
+				<div class="family-person person-child">
+					<div class="person-head"></div>
+					<div class="person-body"></div>
+				</div>
+				<div class="scene-shield">
+					<i class="bi bi-shield-check"></i>
+				</div>
+				<div class="scene-leaf leaf-one"></div>
+				<div class="scene-leaf leaf-two"></div>
+				<i class="bi bi-heart-fill scene-heart heart-one"></i>
+				<i class="bi bi-heart-fill scene-heart heart-two"></i>
+				<i class="bi bi-heart-fill scene-heart heart-three"></i>
+			</div>
+			<div class="story-values">
+				<span
+					><i class="bi bi-eye" aria-hidden="true"></i> Minh bạch với
+					trẻ</span
+				><span
+					><i class="bi bi-people" aria-hidden="true"></i> Phụ huynh
+					đồng hành</span
+				>
+			</div>
+		</aside>
+		<section class="auth-form-card" aria-labelledby="auth-title">
+			<nav class="auth-switch" aria-label="Tài khoản">
+				<a href="/login" aria-current="{{ 'page' if page_name == 'login' else 'false' }}">Đăng nhập</a>
+				<a href="/register" aria-current="{{ 'page' if page_name == 'register' else 'false' }}">Đăng ký</a>
+			</nav>
+			{% block auth_form %}{% endblock %}
+		</section>
+	</div>
+	<footer class="auth-footer">
+		<span>OpenGuard Kids · Đồng hành cùng gia đình</span
+		><span
+			><i class="bi bi-shield-check" aria-hidden="true"></i> Minh bạch.
+			Tôn trọng. Kết nối.</span
+		>
+	</footer>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends "auth/layout.html" %}
+{% block title %}Đăng ký · OpenGuard Kids{% endblock %}
+{% block auth_form %}
+<div class="auth-form-heading"><span class="eyebrow">BẮT ĐẦU HÀNH TRÌNH CÙNG CON</span><h2 id="auth-title">Kết nối từ hôm nay.</h2><p>Tạo tài khoản phụ huynh cho gia đình bạn.</p></div>
+<div id="register-error" class="alert alert-danger d-none" role="alert" tabindex="-1"></div>
+<form id="register-form">
+  <div class="auth-field"><label for="email">Email của bạn</label><input class="form-control" id="email" name="email" type="email" placeholder="ban@example.com" required autocomplete="email" maxlength="320" /></div>
+  <div class="auth-field"><label for="password">Mật khẩu</label><div class="password-input"><input class="form-control" id="password" name="password" type="password" placeholder="Tạo mật khẩu của bạn" required minlength="10" maxlength="128" autocomplete="new-password" aria-describedby="password-rules" /><button type="button" class="password-toggle" data-toggle-password="password" aria-controls="password" aria-label="Hiện mật khẩu" aria-pressed="false"><i class="bi bi-eye" aria-hidden="true"></i></button></div>
+    <ul id="password-rules" class="password-rules">
+      <li data-rule="length"><span aria-hidden="true">○</span> Từ 10 đến 128 ký tự</li>
+      <li data-rule="uppercase"><span aria-hidden="true">○</span> Ít nhất 1 chữ hoa (A–Z)</li>
+      <li data-rule="digit"><span aria-hidden="true">○</span> Ít nhất 1 chữ số (0–9)</li>
+      <li data-rule="special"><span aria-hidden="true">○</span> Ít nhất 1 ký tự đặc biệt (!@#…)</li>
+      <li data-rule="ascii"><span aria-hidden="true">○</span> Chỉ ký tự ASCII hiển thị, không dấu và không khoảng trắng</li>
+    </ul>
+  </div>
+  <div class="auth-field"><label for="confirm-password">Xác nhận mật khẩu</label><div class="password-input"><input class="form-control" id="confirm-password" name="confirm-password" type="password" placeholder="Nhập lại mật khẩu" required autocomplete="new-password" aria-describedby="password-match" /><button type="button" class="password-toggle" data-toggle-password="confirm-password" aria-controls="confirm-password" aria-label="Hiện mật khẩu xác nhận" aria-pressed="false"><i class="bi bi-eye" aria-hidden="true"></i></button></div><small id="password-match" class="match-message" aria-live="polite"></small></div>
+  <button id="register-button" class="btn btn-primary auth-submit" type="submit">Tạo tài khoản <i class="bi bi-arrow-right" aria-hidden="true"></i></button>
+</form>
+<p class="auth-alternate">Đã có tài khoản? <a href="/login">Đăng nhập</a></p>
+{% endblock %}

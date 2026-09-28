@@ -1,0 +1,14 @@
+{% extends "auth/layout.html" %}
+{% block title %}Đăng nhập · OpenGuard Kids{% endblock %}
+{% block auth_form %}
+<div class="auth-form-heading"><span class="eyebrow">GÓC NHỎ CỦA GIA ĐÌNH</span><h2 id="auth-title">Chào mừng trở lại!</h2><p>Đăng nhập để tiếp tục đồng hành cùng con.</p></div>
+<div id="login-success" class="alert alert-success d-none" role="status">Tạo tài khoản thành công. Bạn có thể đăng nhập ngay.</div>
+<div id="login-error" class="alert alert-danger d-none" role="alert" tabindex="-1"></div>
+<form id="login-form">
+  <div class="auth-field"><label for="email">Email của bạn</label><input class="form-control" id="email" name="email" type="email" placeholder="ban@example.com" required autocomplete="email" maxlength="320" /></div>
+  <div class="auth-field"><label for="password">Mật khẩu</label><div class="password-input"><input class="form-control" id="password" name="password" type="password" placeholder="Nhập mật khẩu của bạn" required autocomplete="current-password" /><button type="button" class="password-toggle" data-toggle-password="password" aria-controls="password" aria-label="Hiện mật khẩu" aria-pressed="false"><i class="bi bi-eye" aria-hidden="true"></i></button></div></div>
+  <button id="login-button" class="btn btn-primary auth-submit" type="submit">Đăng nhập <i class="bi bi-arrow-right" aria-hidden="true"></i></button>
+</form>
+<p class="auth-alternate">Mới đến OpenGuard Kids? <a href="/register">Tạo tài khoản</a></p>
+<div class="auth-reassurance"><i class="bi bi-heart" aria-hidden="true"></i><p>Một nơi để cùng con xây dựng thói quen số lành mạnh, bắt đầu bằng sự tin tưởng.</p></div>
+{% endblock %}

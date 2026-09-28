@@ -12,3 +12,6 @@ class ChildResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class ChildSummaryResponse(ChildResponse):
+    device_count: int
+    online_count: int
