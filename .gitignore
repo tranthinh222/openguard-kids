@@ -12,3 +12,5 @@ server/data/*.db-wal
 htmlcov/
 
 QuanLyMayTinhTreEm.pdf
+.vscode/extensions.json
+.vscode/settings.json
