@@ -257,12 +257,58 @@ class AgentWindow:
         self.header_pill = tk.Label(inner, font=self.f_small, padx=px(10), pady=px(3))
         self.header_pill.pack(side="right")
 
-        self.content = tk.Frame(self.root, bg=BG, padx=px(24), pady=px(18))
-        self.content.pack(fill="both", expand=True)
+        scroll_host = tk.Frame(self.root, bg=BG)
+        scroll_host.pack(fill="both", expand=True)
+
+        self.content_canvas = tk.Canvas(
+            scroll_host,
+            bg=BG,
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        self.content_scrollbar = tk.Scrollbar(
+            scroll_host,
+            orient="vertical",
+            command=self.content_canvas.yview,
+        )
+        self.content_canvas.configure(yscrollcommand=self.content_scrollbar.set)
+        self.content_scrollbar.pack(side="right", fill="y")
+        self.content_canvas.pack(side="left", fill="both", expand=True)
+
+        self.content = tk.Frame(self.content_canvas, bg=BG, padx=px(24), pady=px(18))
+        self.content_window = self.content_canvas.create_window(
+            0,
+            0,
+            anchor="nw",
+            window=self.content,
+        )
+        self.content.bind("<Configure>", self._update_scroll_region)
+        self.content_canvas.bind("<Configure>", self._resize_scroll_content)
+        self.content_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.content_canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self.content_canvas.bind_all("<Button-5>", self._on_mousewheel)
+
         self.pair_view = tk.Frame(self.content, bg=BG)
         self.status_view = tk.Frame(self.content, bg=BG)
         self._build_pair_view(self.pair_view)
         self._build_status_view(self.status_view)
+
+    def _update_scroll_region(self, _event: tk.Event | None = None) -> None:
+        self.content_canvas.configure(scrollregion=self.content_canvas.bbox("all"))
+
+    def _resize_scroll_content(self, event: tk.Event) -> None:
+        self.content_canvas.itemconfigure(self.content_window, width=event.width)
+
+    def _on_mousewheel(self, event: tk.Event) -> str:
+        if getattr(event, "num", None) == 4:
+            units = -1
+        elif getattr(event, "num", None) == 5:
+            units = 1
+        else:
+            delta = getattr(event, "delta", 0)
+            units = -1 if delta > 0 else 1
+        self.content_canvas.yview_scroll(units, "units")
+        return "break"
 
     def _card(self, master: tk.Misc, bg: str = SURFACE, border: str = BORDER, pad: int = 22) -> tk.Frame:
         # The border is the outer frame's background showing around the body, which
@@ -411,12 +457,9 @@ class AgentWindow:
             canvas.itemconfigure("dot", fill=color)
 
     def _fit_window(self) -> None:
-        """Grow the window when a section opens so nothing is clipped; never shrink it."""
+        """Refresh scrolling after a collapsible section changes size."""
         self.root.update_idletasks()
-        needed = self.root.winfo_reqheight()
-        screen = self.root.winfo_screenheight() - px(80)
-        if self.root.winfo_height() < needed:
-            self.root.geometry(f"{self.root.winfo_width()}x{min(needed, screen)}")
+        self._update_scroll_region()
 
     def _set_pill(self, text: str, fg: str, bg: str) -> None:
         self.header_pill.configure(text=f"●  {text}", fg=fg, bg=bg)
@@ -440,6 +483,7 @@ class AgentWindow:
     def _show_pair_view(self, allow_back: bool = False) -> None:
         self.status_view.pack_forget()
         self.pair_view.pack(fill="both", expand=True)
+        self.content_canvas.yview_moveto(0)
         self.stepper.set_step(0)
         self._fit_window()
         if allow_back:
@@ -452,6 +496,7 @@ class AgentWindow:
     def _show_status_view(self) -> None:
         self.pair_view.pack_forget()
         self.status_view.pack(fill="both", expand=True)
+        self.content_canvas.yview_moveto(0)
         self.root.focus_set()
         self._fit_window()
 
