@@ -1,14 +1,21 @@
-from fastapi import APIRouter, Depends, status
+import json
+
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
+from jwt import InvalidTokenError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_device, get_db
+from app.core.database import SessionLocal
+from app.core.security import decode_access_token
 from app.models.device import Device
 from app.schemas.device import DeviceAccessTokenResponse, DeviceRefreshRequest
 from app.schemas.heartbeat import HeartbeatRequest, HeartbeatResponse
 from app.schemas.policy import PolicyResponse
+from app.services.command_service import ack_command, as_agent_command, mark_sent, pending_commands
 from app.services.device_service import process_heartbeat
 from app.services.enrollment_service import refresh_device_access_token
 from app.services.policy_service import get_latest_policy
+from app.services.realtime import manager
 
 router = APIRouter()
 
@@ -42,6 +49,8 @@ def heartbeat(
         db=db,
         device=device,
         agent_policy_version=payload.policy_version,
+        quota_used_sec=payload.quota_used_sec,
+        agent_wall_clock=payload.agent_wall_clock,
     )
 
 @router.get("/policy", response_model=PolicyResponse)
@@ -50,3 +59,64 @@ def get_policy(
     db: Session = Depends(get_db),
 ):
     return get_latest_policy(db, device.child_id)
+
+@router.websocket("/ws")
+async def device_websocket(websocket: WebSocket):
+    authorization = websocket.headers.get("authorization", "")
+    if not authorization.startswith("Bearer "):
+        await websocket.close(code=4401)
+        return
+
+    token = authorization.removeprefix("Bearer ").strip()
+
+    try:
+        payload = decode_access_token(token)
+    except InvalidTokenError:
+        await websocket.close(code=4401)
+        return
+
+    if payload.get("type") != "device":
+        await websocket.close(code=4403)
+        return
+
+    override = websocket.app.dependency_overrides.get(get_db)
+    override_gen = None
+
+    if override is not None:
+        override_gen = override()
+        db = next(override_gen)
+    else:
+        db = SessionLocal()
+
+    device = db.get(Device, payload.get("sub"))
+    if device is None or device.status != "active" or device.revoked_at is not None:
+        db.close()
+        await websocket.close(code=4401)
+        return
+
+    await manager.connect(device.id, websocket)
+
+    try:
+        # Flush queued commands immediately on connection
+        for command in pending_commands(db, device.id):
+            await websocket.send_json(as_agent_command(command).model_dump(mode="json"))
+            mark_sent(db, command)
+
+        while True:
+            message = await websocket.receive_json()
+            if message.get("type") == "ack":
+                ack_command(
+                    db, device.id, str(message.get("command_id", "")),
+                    str(message.get("status", "completed")), message.get("error"),
+                )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await manager.disconnect(device.id, websocket)
+        if override_gen is not None:
+            try:
+                next(override_gen)
+            except StopIteration:
+                pass
+        else:
+            db.close()
