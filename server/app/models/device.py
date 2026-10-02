@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, uuid4_str
@@ -21,6 +21,8 @@ class Device(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     current_policy_version: Mapped[Integer] = mapped_column(Integer, default=0, nullable=False)
+    quota_used_sec: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    clock_drift_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     child = relationship("Child", back_populates="devices")
