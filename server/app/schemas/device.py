@@ -26,4 +26,6 @@ class ParentDeviceResponse(BaseModel):
     status: str
     last_seen_at: UTCDateTime | None
     current_policy_version: int
+    quota_used_sec: int = 0
+    clock_drift_sec: float | None = None
     online: bool

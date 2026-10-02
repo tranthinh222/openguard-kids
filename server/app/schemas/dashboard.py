@@ -2,7 +2,6 @@ from pydantic import BaseModel
 
 from app.schemas.device import UTCDateTime
 
-
 class DashboardDeviceResponse(BaseModel):
     id: str
     child_id: str
