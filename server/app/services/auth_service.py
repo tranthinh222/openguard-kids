@@ -103,8 +103,7 @@ def validate_password(password: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Password must contain between 10 and 128 characters, "
-                "has at least 1 UPPERCASE, 1 digit, and 1 special character; "
-                "only printable ASCIIs are allowed, no spaces."
+                "Độ dài mật khẩu phải từ 10 đến 128 ký tự, "
+                "có ít nhất 1 chữ hoa (A-Z), 1 chữ số (0-9), và 1 ký tự đặc biệt, không cho phép khoảng trắng."
             )
         )
