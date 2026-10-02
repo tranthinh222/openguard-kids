@@ -15,7 +15,20 @@ Both account forms support password visibility controls, loading states and API 
 
 ## Dashboard pages
 
-`/dashboard`, `/children`, `/children/new`, and `/children/{child_id}` use the shared authenticated shell and fetch their data through `/api/v1/` routes. Enrollment creation and countdown rendering are handled by `child-detail.js`.
+The dashboard uses first-class workspaces with separate responsibilities:
+
+- `/dashboard` — family overview.
+- `/children` — child profiles.
+- `/children/new` — create a child profile.
+- `/children/{child_id}` — devices, enrollment and shortcuts to child-related workspaces.
+- `/policies` — policy overview for all children.
+- `/policies/{child_id}` — screen-time quota and 7 × 48 weekly schedule editor.
+- `/requests` — centralized extra-time request queue with child/status filters.
+- Reports remain unavailable until Week 03.
+
+All pages use the shared authenticated shell and fetch data through `/api/v1/` routes. Enrollment creation, copy/countdown and live pairing status remain in `child-detail.js`. Policy editing is owned by `policies.js`; request processing is owned by `requests.js`.
+
+Legacy Week 02 URLs such as `/children?view=policies` and `/children/{id}?view=requests` redirect to the new first-class routes. No API contract or database migration is required for this UI refactor.
 
 ## UI
 
@@ -34,7 +47,6 @@ Run the account integration checks from `server/`:
 ```
 
 The tests use the existing isolated in-memory database fixture.
-
 
 ## Automatic device updates
 

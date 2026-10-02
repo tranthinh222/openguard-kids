@@ -1,0 +1,39 @@
+{% extends "base.html" %} {% block title %}Yêu cầu · OpenGuard Kids{% endblock
+%} {% block content %}
+<div
+  class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4"
+>
+  <div>
+    <h1 class="h3 mb-1">Yêu cầu</h1>
+    <p class="text-secondary mb-0">
+      Theo dõi và xử lý các yêu cầu xin thêm thời gian từ trẻ.
+    </p>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    <select
+      id="request-child-filter"
+      class="form-select form-select-sm"
+      aria-label="Lọc theo trẻ"
+    >
+      <option value="">Tất cả trẻ</option>
+    </select>
+    <select
+      id="request-status-filter"
+      class="form-select form-select-sm"
+      aria-label="Lọc theo trạng thái"
+    >
+      <option value="">Tất cả trạng thái</option>
+      <option value="pending">Đang chờ</option>
+      <option value="approved">Đã duyệt</option>
+      <option value="rejected">Đã từ chối</option>
+    </select>
+  </div>
+</div>
+
+<div id="requests-list" class="vstack gap-3">
+  <div class="loading-state card border-0 shadow-sm">
+    <div class="spinner-border spinner-border-sm" role="status"></div>
+    <span>Đang tải yêu cầu...</span>
+  </div>
+</div>
+{% endblock %}

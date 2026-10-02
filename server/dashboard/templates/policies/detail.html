@@ -1,0 +1,172 @@
+{% extends "base.html" %} {% block title %}Chỉnh chính sách · OpenGuard Kids{%
+endblock %} {% block content %}
+<a class="text-decoration-none small" href="/policies">
+  <i class="bi bi-arrow-left me-1"></i>Danh sách chính sách
+</a>
+
+<div
+  class="d-flex flex-wrap justify-content-between align-items-start gap-3 mt-3 mb-4"
+>
+  <div>
+    <h1 id="policy-child-name" class="h3 mb-1">Đang tải...</h1>
+    <p class="text-secondary mb-0">
+      Chính sách hiện tại: <span id="policy-version">—</span>
+    </p>
+  </div>
+  <a id="policy-child-link" class="btn btn-outline-secondary" href="#">
+    <i class="bi bi-person me-2"></i>Xem hồ sơ trẻ
+  </a>
+</div>
+
+<div class="row g-4">
+  <div class="col-12 col-xl-4">
+    <section class="card border-0 shadow-sm h-100">
+      <div class="card-body p-4">
+        <div
+          class="d-flex align-items-start justify-content-between gap-3 mb-3"
+        >
+          <div>
+            <h2 class="h5 mb-1">Giới hạn thời gian</h2>
+            <p class="small text-secondary mb-0">
+              Chính sách mới được Agent đồng bộ trong tối đa 60 giây.
+            </p>
+          </div>
+          <i
+            class="bi bi-hourglass-split text-primary fs-4"
+            aria-hidden="true"
+          ></i>
+        </div>
+
+        <div class="vstack gap-3">
+          <div>
+            <label class="form-label" for="weekday-minutes">Ngày thường</label>
+            <div class="input-group">
+              <input
+                id="weekday-minutes"
+                type="number"
+                min="1"
+                max="1440"
+                class="form-control"
+              />
+              <span class="input-group-text">phút/ngày</span>
+            </div>
+          </div>
+          <div>
+            <label class="form-label" for="weekend-minutes">Cuối tuần</label>
+            <div class="input-group">
+              <input
+                id="weekend-minutes"
+                type="number"
+                min="1"
+                max="1440"
+                class="form-control"
+              />
+              <span class="input-group-text">phút/ngày</span>
+            </div>
+          </div>
+          <div>
+            <label class="form-label" for="idle-timeout"
+              >Không hoạt động sau</label
+            >
+            <div class="input-group">
+              <input
+                id="idle-timeout"
+                type="number"
+                min="60"
+                max="3600"
+                class="form-control"
+              />
+              <span class="input-group-text">giây</span>
+            </div>
+          </div>
+          <div>
+            <label class="form-label" for="grace-period">Ân hạn lưu bài</label>
+            <div class="input-group">
+              <input
+                id="grace-period"
+                type="number"
+                min="0"
+                max="300"
+                class="form-control"
+              />
+              <span class="input-group-text">giây</span>
+            </div>
+          </div>
+          <p class="small text-secondary mb-0">
+            Agent cảnh báo trước <strong>10, 5 và 1 phút</strong> trước khi hết
+            quota.
+          </p>
+          <button id="save-policy-button" class="btn btn-primary" type="button">
+            <i class="bi bi-check2-circle me-2"></i>Lưu chính sách
+          </button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <section class="card border-0 shadow-sm h-100">
+      <div class="card-body p-4">
+        <div
+          class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3"
+        >
+          <div>
+            <h2 class="h5 mb-1">Lịch sử dụng hàng tuần</h2>
+            <p class="small text-secondary mb-0">
+              Mỗi ô tương ứng 30 phút. Màu xanh là được phép sử dụng.
+            </p>
+          </div>
+          <div
+            class="btn-group btn-group-sm"
+            role="group"
+            aria-label="Chỉnh nhanh lịch sử dụng"
+          >
+            <button
+              id="schedule-all"
+              class="btn btn-outline-primary"
+              type="button"
+            >
+              Cho phép tất cả
+            </button>
+            <button
+              id="schedule-none"
+              class="btn btn-outline-secondary"
+              type="button"
+            >
+              Khóa tất cả
+            </button>
+          </div>
+        </div>
+        <div class="schedule-legend small text-secondary mb-2">
+          <span
+            ><span class="schedule-legend-dot allowed"></span>Được dùng</span
+          >
+          <span><span class="schedule-legend-dot blocked"></span>Bị khóa</span>
+        </div>
+        <div class="schedule-scroll">
+          <div
+            id="schedule-grid"
+            class="schedule-grid"
+            aria-label="Lịch sử dụng 7 ngày"
+          ></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-4">
+  <div
+    class="card-body p-4 d-flex flex-wrap justify-content-between align-items-center gap-3"
+  >
+    <div>
+      <h2 class="h6 mb-1">Mở rộng ở Week 03</h2>
+      <p class="small text-secondary mb-0">
+        App Rules, Domain Rules và SafeSearch sẽ được bổ sung vào module Chính
+        sách này.
+      </p>
+    </div>
+    <span class="badge text-bg-light border">Coming Week 03</span>
+  </div>
+</div>
+{% endblock %}

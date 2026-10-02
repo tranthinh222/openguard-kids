@@ -1,54 +1,118 @@
 {% extends "base.html" %} {% block title %}Chi tiết trẻ · OpenGuard Kids{%
 endblock %} {% block content %}
-<a class="text-decoration-none small" href="/children"
-	><i class="bi bi-arrow-left me-1"></i>Danh sách trẻ em</a
->
+<a class="text-decoration-none small" href="/children">
+  <i class="bi bi-arrow-left me-1"></i>Danh sách trẻ em
+</a>
+
 <div
-	class="d-flex flex-wrap justify-content-between align-items-start gap-3 mt-3 mb-4"
+  class="d-flex flex-wrap justify-content-between align-items-start gap-3 mt-3 mb-4"
 >
-	<div>
-		<h1 id="child-name" class="h3 mb-1">Đang tải...</h1>
-		<p class="text-secondary mb-0">
-			Policy hiện tại: <span id="policy-version">—</span>
-		</p>
-	</div>
+  <div>
+    <h1 id="child-name" class="h3 mb-1">Đang tải...</h1>
+    <p class="text-secondary mb-0">
+      Chính sách hiện tại: <span id="policy-version">—</span>
+    </p>
+  </div>
 </div>
 
 <div class="row g-4">
-	<div class="col-12 col-xl-8">
-		<div class="card border-0 shadow-sm">
-			<div class="card-header bg-white border-0 pt-4 px-4">
-				<h2 class="h5 mb-0">Thiết bị</h2>
-			</div>
-			<div id="child-devices" class="card-body p-0">
-				<div class="loading-state">
-					<div
-						class="spinner-border spinner-border-sm"
-						role="status"
-					></div>
-					<span>Đang tải thiết bị...</span>
-				</div>
-			</div>
-		</div>
-	</div>
+  <div class="col-12 col-xl-8">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white border-0 pt-4 px-4">
+        <h2 class="h5 mb-0">Thiết bị</h2>
+      </div>
+      <div id="child-devices" class="card-body p-0">
+        <div class="loading-state">
+          <div class="spinner-border spinner-border-sm" role="status"></div>
+          <span>Đang tải thiết bị...</span>
+        </div>
+      </div>
+    </div>
+  </div>
 
-	<div class="col-12 col-xl-4">
-		<div class="card border-0 shadow-sm">
-			<div class="card-body p-4">
-				<h2 class="h5">Ghép thiết bị mới</h2>
-				<p class="text-secondary small">
-					Mã gồm 8 ký tự và hết hạn sau 10 phút.
-				</p>
-				<button
-					id="create-enrollment-button"
-					class="btn btn-primary w-100"
-					type="button"
-				>
-					<i class="bi bi-link-45deg me-2"></i>Tạo mã ghép đôi
-				</button>
-				<div id="enrollment-panel" class="mt-3"></div>
-			</div>
-		</div>
-	</div>
+  <div class="col-12 col-xl-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body p-4">
+        <h2 class="h5">Ghép thiết bị mới</h2>
+        <p class="text-secondary small">
+          Mã gồm 8 ký tự và hết hạn sau 10 phút.
+        </p>
+        <button
+          id="create-enrollment-button"
+          class="btn btn-primary w-100"
+          type="button"
+        >
+          <i class="bi bi-link-45deg me-2"></i>Tạo mã ghép đôi
+        </button>
+        <div id="enrollment-panel" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
 </div>
+
+<section class="mt-4">
+  <div class="mb-3">
+    <h2 class="h5 mb-1">Quản lý</h2>
+    <p class="small text-secondary mb-0">
+      Các chức năng nghiệp vụ được tách thành workspace riêng để dễ theo dõi.
+    </p>
+  </div>
+  <div class="row g-3">
+    <div class="col-12 col-md-6 col-xl-4">
+      <article class="card border-0 shadow-sm h-100">
+        <div class="card-body p-4">
+          <i class="bi bi-sliders text-primary fs-3" aria-hidden="true"></i>
+          <h3 class="h6 mt-3">Chính sách</h3>
+          <p class="small text-secondary">
+            Chỉnh quota, idle timeout, grace period và lịch sử dụng 7 × 48.
+          </p>
+          <a
+            id="child-policy-link"
+            class="btn btn-outline-primary w-100"
+            href="/policies/{{ child_id }}"
+            >Mở chính sách</a
+          >
+        </div>
+      </article>
+    </div>
+    <div class="col-12 col-md-6 col-xl-4">
+      <article class="card border-0 shadow-sm h-100">
+        <div class="card-body p-4">
+          <i
+            class="bi bi-chat-square-heart text-primary fs-3"
+            aria-hidden="true"
+          ></i>
+          <h3 class="h6 mt-3">Yêu cầu</h3>
+          <p class="small text-secondary">
+            Xem và xử lý yêu cầu xin thêm thời gian của trẻ.
+          </p>
+          <a
+            id="child-requests-link"
+            class="btn btn-outline-primary w-100"
+            href="/requests?child_id={{ child_id }}"
+            >Xem yêu cầu</a
+          >
+        </div>
+      </article>
+    </div>
+    <div class="col-12 col-md-6 col-xl-4">
+      <article class="card border-0 shadow-sm h-100 opacity-75">
+        <div class="card-body p-4">
+          <i class="bi bi-bar-chart text-secondary fs-3" aria-hidden="true"></i>
+          <h3 class="h6 mt-3">Báo cáo</h3>
+          <p class="small text-secondary">
+            Usage charts, apps, domains và blocked events.
+          </p>
+          <button
+            class="btn btn-outline-secondary w-100"
+            type="button"
+            disabled
+          >
+            Xem báo cáo
+          </button>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
 {% endblock %}
