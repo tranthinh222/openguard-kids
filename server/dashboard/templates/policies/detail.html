@@ -13,7 +13,11 @@ endblock %} {% block content %}
       Chính sách hiện tại: <span id="policy-version">—</span>
     </p>
   </div>
-  <a id="policy-child-link" class="btn btn-outline-secondary" href="#">
+  <a
+    id="policy-child-link"
+    class="btn btn-outline-secondary"
+    href="/children/{{ child_id }}"
+  >
     <i class="bi bi-person me-2"></i>Xem hồ sơ trẻ
   </a>
 </div>
