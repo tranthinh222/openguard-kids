@@ -203,6 +203,7 @@ class AgentWindow:
         SCALE = detect_scale(root)
         self.root = root
         self.controller = AgentController()
+        self.controller.on_command_event = self._queue_protection_event
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.worker = HeartbeatWorker(self.controller, self._queue_heartbeat)
         self.protection = ProtectionWorker(self.controller, self._queue_protection_event)
@@ -737,6 +738,15 @@ class AgentWindow:
                     elif kind == "GRACE_STARTED":
                         self._show_banner(
                             f"Thời gian sử dụng hôm nay đã hết. Em có {payload['seconds_remaining']} giây để lưu bài.",
+                            "warning",
+                        )
+                    elif kind == "TIME_ADDED":
+                        prefix = "Phụ huynh đã duyệt yêu cầu." if payload.get("requested") else "Phụ huynh vừa cộng giờ."
+                        self._show_banner(f"{prefix} Em có thêm {payload['minutes']} phút.")
+                    elif kind == "REQUEST_REJECTED":
+                        reason = payload.get("response")
+                        self._show_banner(
+                            "Phụ huynh đã từ chối yêu cầu thêm giờ." + (f" Lời nhắn: {reason}" if reason else ""),
                             "warning",
                         )
                     elif kind == "PROTECTION_ERROR":

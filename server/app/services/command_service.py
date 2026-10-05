@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.security import utc_now
 from app.models.command import DeviceCommand
 from app.schemas.command import AgentCommandResponse
+from app.services.realtime import manager
 
 def create_command(
     db: Session, 
@@ -38,6 +39,15 @@ def mark_sent(db: Session, command: DeviceCommand) -> None:
         command.sent_at = utc_now()
 
         db.commit()
+
+async def push_command(db: Session, command: DeviceCommand) -> bool:
+    """Deliver a queued command over WebSocket now; heartbeat remains the fallback."""
+    delivered = await manager.send(command.device_id, as_agent_command(command).model_dump(mode="json"))
+
+    if delivered:
+        mark_sent(db, command)
+
+    return delivered
 
 def ack_command(
     db: Session, 

@@ -60,3 +60,30 @@ def test_realtime_websocket_delivers_parent_command(client):
         assert message["command_id"] == created.json()["id"]
         assert message["type"] == "ADD_TIME"
         ws.send_json({"type": "ack", "command_id": message["command_id"], "status": "completed"})
+
+
+def test_request_decisions_are_pushed_to_agent_in_realtime(client):
+    headers = parent_headers(client, "decision@example.com")
+    cid, device = enrolled_device(client, headers)
+    auth = {"Authorization": f"Bearer {device['access_token']}"}
+    base = f"/api/v1/children/{cid}/requests"
+    with client.websocket_connect("/api/v1/agent/ws", headers=auth) as ws:
+        first = client.post("/api/v1/agent/requests", headers=auth, json={"type": "extra_time", "requested_minutes": 15}).json()["id"]
+        assert client.post(f"{base}/{first}/reject", headers=headers, json={"response": "Mai nhé"}).status_code == 200
+        rejected = ws.receive_json()
+        assert rejected["type"] == "REQUEST_REJECTED"
+        assert rejected["payload"] == {"minutes": 15, "request_id": first, "response": "Mai nhé"}
+
+        second = client.post("/api/v1/agent/requests", headers=auth, json={"type": "extra_time", "requested_minutes": 15}).json()["id"]
+        assert client.post(f"{base}/{second}/approve", headers=headers, json={}).status_code == 200
+        approved = ws.receive_json()
+        assert approved["type"] == "ADD_TIME"
+        assert approved["payload"] == {"minutes": 15, "request_id": second}
+
+
+def test_parent_cannot_send_request_rejected_command(client):
+    headers = parent_headers(client, "forged@example.com")
+    cid, _ = enrolled_device(client, headers)
+    device_id = client.get(f"/api/v1/children/{cid}/devices", headers=headers).json()[0]["id"]
+    forged = client.post(f"/api/v1/devices/{device_id}/commands", headers=headers, json={"type": "REQUEST_REJECTED"})
+    assert forged.status_code == 422

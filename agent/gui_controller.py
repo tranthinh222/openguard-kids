@@ -90,6 +90,8 @@ class AgentController:
     def __init__(self, config: AgentConfig | None = None):
         self.config = config or AgentConfig.from_env()
         self.store = StateStore(self.config.state_path)
+        # Commands arrive over WebSocket or heartbeat; both report through this callback.
+        self.on_command_event: Callable[[dict], None] | None = None
 
     def state(self) -> AgentState:
         return self.store.load()
@@ -106,7 +108,7 @@ class AgentController:
             client.close()
 
     def heartbeat(self) -> dict:
-        client = AgentClient(self.config, self.store)
+        client = AgentClient(self.config, self.store, on_command_event=self.on_command_event)
         try:
             return client.heartbeat()
         finally:
@@ -178,7 +180,7 @@ class ProtectionWorker:
         self._stop.set()
 
     def _run(self, stop: threading.Event) -> None:
-        client = AgentClient(self.controller.config, self.controller.store)
+        client = AgentClient(self.controller.config, self.controller.store, on_command_event=self.on_event)
         websocket = None
         try:
             counter = client.screen_time_counter(self.on_event)

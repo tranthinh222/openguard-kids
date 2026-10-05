@@ -6,6 +6,7 @@ from app.models.device import Device
 from app.models.user import User
 from app.schemas.request import AgentChildRequestCreate, ChildRequestResponse, RequestDecision
 from app.services.child_service import get_owned_child
+from app.services.command_service import push_command
 from app.services.request_service import create_child_request, decide_request, list_child_requests
 
 router = APIRouter()
@@ -30,7 +31,7 @@ def parent_list_requests(
     return list_child_requests(db, child.id)
 
 @router.post("/children/{child_id}/requests/{request_id}/approve", response_model=ChildRequestResponse)
-def approve_request(
+async def approve_request(
     child_id: str,
     request_id: str,
     payload: RequestDecision,
@@ -38,11 +39,15 @@ def approve_request(
     db: Session = Depends(get_db),
 ):
     child = get_owned_child(db, parent.id, child_id)
-    
-    return decide_request(db, request_id, child.id, parent.id, True, payload.response)
+    item, command = decide_request(db, request_id, child.id, parent.id, True, payload.response)
+
+    if command is not None:
+        await push_command(db, command)
+
+    return item
 
 @router.post("/children/{child_id}/requests/{request_id}/reject", response_model=ChildRequestResponse)
-def reject_request(
+async def reject_request(
     child_id: str,
     request_id: str,
     payload: RequestDecision,
@@ -50,5 +55,9 @@ def reject_request(
     db: Session = Depends(get_db),
 ):
     child = get_owned_child(db, parent.id, child_id)
+    item, command = decide_request(db, request_id, child.id, parent.id, False, payload.response)
 
-    return decide_request(db, request_id, child.id, parent.id, False, payload.response)
+    if command is not None:
+        await push_command(db, command)
+
+    return item

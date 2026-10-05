@@ -3,10 +3,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-CommandType = Literal["LOCK_NOW", "UNLOCK", "ADD_TIME"]
+ParentCommandType = Literal["LOCK_NOW", "UNLOCK", "ADD_TIME"]
+# REQUEST_REJECTED is created only by the server when a parent rejects a request.
+CommandType = Literal["LOCK_NOW", "UNLOCK", "ADD_TIME", "REQUEST_REJECTED"]
 
 class CommandCreateRequest(BaseModel):
-    type: CommandType
+    type: ParentCommandType
     minutes: int | None = Field(default=None, ge=1, le=240)
 
 class AgentCommandResponse(BaseModel):

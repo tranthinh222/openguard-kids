@@ -46,7 +46,7 @@ class ProcessedCommandRepository:
 
 
 class CommandHandler:
-    TYPES = {"LOCK_NOW", "UNLOCK", "ADD_TIME"}
+    TYPES = {"LOCK_NOW", "UNLOCK", "ADD_TIME", "REQUEST_REJECTED"}
 
     def __init__(
         self,
@@ -54,11 +54,13 @@ class CommandHandler:
         usage: UsageRepository,
         enforcer: WorkstationEnforcer,
         today: Callable = lambda: datetime.now().astimezone().date(),
+        on_event: Callable[[dict], None] | None = None,
     ):
         self.repository = repository
         self.usage = usage
         self.enforcer = enforcer
         self.today = today
+        self.on_event = on_event or (lambda _event: None)
 
     def handle(self, command: dict[str, Any]) -> CommandResult:
         command_id = command.get("command_id")
@@ -69,6 +71,7 @@ class CommandHandler:
         if previous:
             return previous
         error = None
+        event: dict[str, Any] | None = None
         try:
             if command_type not in self.TYPES:
                 raise ValueError("unsupported command type")
@@ -80,14 +83,19 @@ class CommandHandler:
                     raise RuntimeError("LockWorkStation failed")
             elif command_type == "UNLOCK":
                 self.enforcer.allow_unlock()
+            elif command_type == "REQUEST_REJECTED":
+                event = {"type": "REQUEST_REJECTED", "response": payload.get("response")}
             else:
                 minutes = payload.get("minutes")
                 if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 240:
                     raise ValueError("ADD_TIME minutes must be between 1 and 240")
                 current = self.usage.get(self.today())
                 self.usage.set_bonus(self.today(), current.bonus_seconds + minutes * 60)
+                event = {"type": "TIME_ADDED", "minutes": minutes, "requested": bool(payload.get("request_id"))}
             status = "completed"
         except (ValueError, RuntimeError, OSError, sqlite3.Error) as exc:
             status, error = "failed", str(exc)[:255]
         self.repository.save(command_id, str(command_type), status, error)
+        if event is not None and status == "completed":
+            self.on_event(event)
         return CommandResult(command_id, status, error)

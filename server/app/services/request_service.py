@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import utc_now
+from app.models.command import DeviceCommand
 from app.models.request import ChildRequest
 from app.services.command_service import create_command
 
@@ -55,7 +56,7 @@ def decide_request(
     parent_id: str,
     approve: bool,
     response: str | None
-) -> ChildRequest:
+) -> tuple[ChildRequest, DeviceCommand | None]:
     item = db.scalar(select(ChildRequest).where(ChildRequest.id == request_id, ChildRequest.child_id == child_id))
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
@@ -68,10 +69,16 @@ def decide_request(
     item.responded_at = utc_now()
     item.responded_by = parent_id
 
-    if approve and item.type == "extra_time":
-        create_command(db, item.device_id, "ADD_TIME", {"minutes": item.requested_minutes})
+    # The agent needs a command in both cases so the child sees the decision.
+    command = None
+    if item.type == "extra_time":
+        body = {"minutes": item.requested_minutes, "request_id": item.id}
+        if approve:
+            command = create_command(db, item.device_id, "ADD_TIME", body)
+        else:
+            command = create_command(db, item.device_id, "REQUEST_REJECTED", {**body, "response": response})
 
     db.commit()
     db.refresh(item)
 
-    return item
+    return item, command

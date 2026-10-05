@@ -36,3 +36,21 @@ def test_failed_lock_returns_failed_result(tmp_path):
     result = handler.handle({"command_id": "c1", "type": "LOCK_NOW", "payload": {}})
     assert result.status == "failed"
     assert "LockWorkStation" in result.error
+
+
+def test_time_added_and_rejection_notify_once(tmp_path):
+    events = []
+    path = tmp_path / "agent.db"
+    handler = CommandHandler(
+        ProcessedCommandRepository(path), UsageRepository(path), WorkstationEnforcer(lock=lambda: True),
+        today=lambda: date(2026, 10, 5), on_event=events.append,
+    )
+    approved = {"command_id": "c1", "type": "ADD_TIME", "payload": {"minutes": 15, "request_id": "r1"}}
+    rejected = {"command_id": "c2", "type": "REQUEST_REJECTED", "payload": {"request_id": "r2", "response": "Mai nhé"}}
+    assert handler.handle(approved).status == "completed"
+    assert handler.handle(approved).duplicate is True
+    assert handler.handle(rejected).status == "completed"
+    assert events == [
+        {"type": "TIME_ADDED", "minutes": 15, "requested": True},
+        {"type": "REQUEST_REJECTED", "response": "Mai nhé"},
+    ]

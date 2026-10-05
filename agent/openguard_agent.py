@@ -154,6 +154,7 @@ class AgentClient:
         config: AgentConfig,
         store: StateStore,
         transport: httpx.BaseTransport | None = None,
+        on_command_event: Callable[[dict], None] | None = None,
     ):
         self.config = config
         self.store = store
@@ -174,6 +175,7 @@ class AgentClient:
         self.command_handler = CommandHandler(
             ProcessedCommandRepository(database_path), self.usage_repository,
             self.enforcer, today=lambda: self.clock_monitor.trusted_now().date(),
+            on_event=on_command_event or (lambda event: LOGGER.info("Command event: %s", event)),
         )
         self.extra_time = ExtraTimeClient(self._authorized_post)
 
