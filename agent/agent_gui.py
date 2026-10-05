@@ -541,6 +541,10 @@ class AgentWindow:
             look = (GREEN, GREEN_SOFT, "✓", "Thiết bị đang được bảo vệ",
                     "OpenGuard đang chạy và đồng bộ với trang phụ huynh.")
             self._set_row(self.row_server, "Đã kết nối", GREEN)
+            clock_status = self.controller.clock_monitor.status
+            if clock_status is not None and clock_status.drifted:
+                look = (AMBER, AMBER_SOFT, "!", "Đồng hồ máy đang sai",
+                        "Đã kết nối. OpenGuard đang dùng giờ máy chủ để áp dụng lịch và hạn mức.")
         elif self.connection == "offline":
             look = (AMBER, AMBER_SOFT, "!", "Đang mất kết nối",
                     f"Agent vẫn chạy và sẽ tự thử lại mỗi {self.controller.config.heartbeat_interval_sec} giây.")
@@ -558,15 +562,19 @@ class AgentWindow:
         self.badge.show(color, soft, glyph)
         self.status_title.configure(text=title)
         self.status_subtitle.configure(text=subtitle)
-        self._set_pill({GREEN: "Đang bảo vệ", AMBER: "Mất kết nối", RED: "Cần xử lý"}.get(color, "Tạm dừng"),
+        self._set_pill({GREEN: "Đang bảo vệ", AMBER: "Cần chú ý", RED: "Cần xử lý"}.get(color, "Tạm dừng"),
                        color if color != GREY else MUTED, soft)
 
+        trusted_now = self.controller.clock_monitor.trusted_now() if self.controller.clock_monitor.ready else None
         if state is not None:
-            self._set_row(self.row_sync, format_sync_time(state.last_heartbeat_at))
+            self._set_row(self.row_sync, format_sync_time(state.last_heartbeat_at, trusted_now))
             version = self.policy_version if self.policy_version is not None else state.policy_version
             self._set_row(self.row_policy, f"phiên bản {version}")
             self.detail_id.set(state.device_id or "—")
-        for key, text in policy_summary(self.controller.current_policy(), datetime.now().weekday()).items():
+        summary = policy_summary(self.controller.current_policy(), trusted_now.weekday() if trusted_now else 0)
+        if trusted_now is None:
+            summary["schedule"] = "Đang chờ xác minh giờ máy chủ"
+        for key, text in summary.items():
             self.policy_rows[key].set(text)
         self.detail_name.set(device_name())
         self.detail_server.set(self.controller.config.server_url)
@@ -743,7 +751,10 @@ class AgentWindow:
                     if event == "checked":
                         self.checking = False
                         if error is None:
-                            self._show_banner("Kết nối ổn định. Đã đồng bộ với trang phụ huynh.")
+                            if self.controller.clock_monitor.status and self.controller.clock_monitor.status.drifted:
+                                self._show_banner("Đồng hồ máy đang sai. OpenGuard đang dùng giờ máy chủ.", "warning")
+                            else:
+                                self._show_banner("Kết nối ổn định. Đã đồng bộ với trang phụ huynh.")
                         else:
                             self._show_banner(self.connection_error,
                                               "warning" if self.connection == "offline" else "error")

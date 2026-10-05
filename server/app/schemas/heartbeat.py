@@ -11,6 +11,9 @@ class HeartbeatRequest(BaseModel):
 
 class HeartbeatResponse(BaseModel):
     server_time: datetime
+    clock_drift_sec: float | None = None
+    clock_trusted: bool
+    clock_drift_threshold_sec: float
     policy_version: int
     policy_update_available: bool
     commands: list[AgentCommandResponse] = Field(default_factory=list)

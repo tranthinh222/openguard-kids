@@ -7,6 +7,9 @@ Agent-side active-use counting with `time.monotonic()`, Windows idle detection,
 10/5/1 minute warnings, grace period, workstation locking, extra-time requests,
 and queued/realtime device commands.
 
+Clock drift handling, restart/offline behavior and manual verification are
+documented in [docs/CLOCK_DRIFT.md](docs/CLOCK_DRIFT.md).
+
 Before running locally, copy `.env.example` to `.env` if `.env` doesn't exist.
 The Agent and Server load this shared project-level file automatically; keep
 `POLICY_HMAC_SECRET` and `OGK_POLICY_HMAC_SECRET` identical. Then run:

@@ -122,6 +122,8 @@ class ScreenTimeCounter:
         enforcer: WorkstationEnforcer | None = None,
         on_event: Callable[[dict], None] | None = None,
         remote_locked: Callable[[], bool] = lambda: False,
+        clock_ready: Callable[[], bool] = lambda: True,
+        clock_sync_timeout_sec: float = 30.0,
     ):
         self.repository = repository
         self.policy_provider = policy_provider
@@ -134,7 +136,11 @@ class ScreenTimeCounter:
         self.enforcer = enforcer
         self.on_event = on_event or (lambda _event: None)
         self.remote_locked = remote_locked
+        self.clock_ready = clock_ready
         self._previous = self.monotonic()
+        # Allow the initial heartbeat to finish before enforcing missing time.
+        # This deadline is fixed, so failed/retried heartbeats cannot extend it.
+        self._clock_sync_deadline = self._previous + max(0.0, clock_sync_timeout_sec)
         self._lock_pending = False
         self._grace_deadline: float | None = None
 
@@ -151,10 +157,19 @@ class ScreenTimeCounter:
                 return TickResult(0, 0, 0, False, "session_locked")
             self._enforce(EnforcementReason.REMOTE_LOCK)
             return TickResult(0, 0, 0, True, "remote_lock")
-        moment = self.now()
         policy = self.policy_provider()
         if policy is None:
             return TickResult(0, 0, 0, False, "no_policy")
+        if not self.clock_ready():
+            if current_mono < self._clock_sync_deadline:
+                return TickResult(0, 0, 0, False, "clock_sync_pending")
+            unlocked = self.unlocked_probe()
+            if unlocked:
+                self._enforce(EnforcementReason.CLOCK_UNVERIFIED)
+            elif self.enforcer:
+                self.enforcer.session_is_locked()
+            return TickResult(0, 0, 0, unlocked, "clock_unverified")
+        moment = self.now()
         usage = self.repository.get(moment.date())
         quota = policy.quota_seconds_at(moment) + usage.bonus_seconds
         available = max(0.0, quota - usage.used_seconds)

@@ -155,6 +155,7 @@ class AgentClient:
         store: StateStore,
         transport: httpx.BaseTransport | None = None,
         on_command_event: Callable[[dict], None] | None = None,
+        clock_monitor: ClockMonitor | None = None,
     ):
         self.config = config
         self.store = store
@@ -170,7 +171,7 @@ class AgentClient:
             if config.policy_hmac_secret else None
         )
         self.usage_repository = UsageRepository(database_path)
-        self.clock_monitor = ClockMonitor(database_path)
+        self.clock_monitor = clock_monitor or ClockMonitor(database_path)
         self.enforcer = WorkstationEnforcer()
         self.remote_lock = RemoteLockRepository(database_path)
         self.command_handler = CommandHandler(
@@ -206,7 +207,8 @@ class AgentClient:
         state = self.store.load()
         if not state.enrolled:
             raise AgentNotEnrolledError("Agent is not enrolled; run enroll first")
-        usage = self.usage_repository.get_if_exists(self.clock_monitor.trusted_now().date())
+        usage = (self.usage_repository.get_if_exists(self.clock_monitor.trusted_now().date())
+                 if self.clock_monitor.ready else None)
         if usage is not None:
             state.quota_used_sec = int(usage.used_seconds)
         response = self._send_heartbeat(state)
@@ -220,15 +222,19 @@ class AgentClient:
             response = self._send_heartbeat(state)
         response.raise_for_status()
         payload: dict[str, Any] = response.json()
-        clock_status = self.clock_monitor.synchronize(payload["server_time"])
+        clock_status = self.clock_monitor.synchronize(
+            payload["server_time"], clock_trusted=payload.get("clock_trusted"),
+            drift_seconds=payload.get("clock_drift_sec"),
+            threshold_seconds=payload.get("clock_drift_threshold_sec"),
+        )
         if clock_status.drifted:
-            LOGGER.warning("Local clock drift detected: %.1f seconds", clock_status.drift_seconds)
+            LOGGER.warning("CLOCK_TAMPERING: local clock drift %.1f seconds; using server time", clock_status.drift_seconds)
         if payload.get("policy_update_available") and self.policy_manager is not None:
             self._sync_policy(state)
         for command in payload.get("commands", []):
             result = self.command_handler.handle(command)
             self._ack_command(result.command_id, result.status, result.error, state)
-        state.last_heartbeat_at = datetime.now(timezone.utc).isoformat()
+        state.last_heartbeat_at = payload["server_time"]
         state.last_server_time = payload["server_time"]
         self.store.save(state)
         return payload
@@ -256,6 +262,7 @@ class AgentClient:
             locker=lambda: False,
             enforcer=self.enforcer,
             now=self.clock_monitor.trusted_now,
+            clock_ready=lambda: self.clock_monitor.ready,
             remote_locked=self.remote_lock.active,
             on_event=on_event or (lambda event: LOGGER.info("Screen-time event: %s", event)),
         )
@@ -310,6 +317,7 @@ class AgentClient:
                 "agent_version": AGENT_VERSION,
                 "quota_used_sec": state.quota_used_sec,
                 "agent_wall_clock": datetime.now(timezone.utc).isoformat(),
+                # "agent_wall_clock": self.clock_monitor.local_now().isoformat(),
             },
         )
 
@@ -336,7 +344,6 @@ def run_forever(client: AgentClient, interval: int) -> None:
     signal.signal(signal.SIGTERM, stop)
     counter = client.screen_time_counter()
     websocket = client.websocket_worker()
-    websocket.start()
     next_heartbeat = 0.0
     LOGGER.info("Agent started; heartbeat interval=%s seconds", interval)
     while not stopped.is_set():
@@ -352,6 +359,8 @@ def run_forever(client: AgentClient, interval: int) -> None:
                 LOGGER.error("Heartbeat failed: %s", exc)
             next_heartbeat = now + interval
         try:
+            if client.clock_monitor.ready:
+                websocket.start()
             result = counter.tick()
             if result.should_lock:
                 LOGGER.warning("Workstation lock requested: %s", result.reason)

@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import sqlite3
 import time
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
+# import os
 
+# def agent_wall_now() -> datetime:
+#     offset = 0.0
+#     if os.getenv("ENVIRONMENT", "").lower() == "development":
+#         offset = float(os.getenv("OGK_TEST_CLOCK_OFFSET_SEC", "0"))
+
+#     return datetime.now(timezone.utc) + timedelta(seconds=offset)
 
 @dataclass(frozen=True)
 class ClockStatus:
@@ -24,6 +32,7 @@ class ClockMonitor:
         threshold_seconds: float = 120,
         monotonic: Callable[[], float] = time.monotonic,
         local_now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        # local_now: Callable[[], datetime] = agent_wall_now,
     ):
         self.path = path
         self.threshold_seconds = threshold_seconds
@@ -31,6 +40,9 @@ class ClockMonitor:
         self.local_now = local_now
         self._server_anchor: datetime | None = None
         self._mono_anchor: float | None = None
+        self._mutex = threading.RLock()
+        self.status: ClockStatus | None = None
+        self._timezone = local_now().astimezone().tzinfo
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as db:
             db.execute("""
@@ -48,21 +60,33 @@ class ClockMonitor:
             raise ValueError("server_time must include a timezone")
         return moment.astimezone(timezone.utc)
 
-    def synchronize(self, server_time: str | datetime) -> ClockStatus:
+    @property
+    def ready(self) -> bool:
+        with self._mutex:
+            return self._server_anchor is not None
+
+    def synchronize(self, server_time: str | datetime, *, clock_trusted: bool | None = None,
+                    drift_seconds: float | None = None, threshold_seconds: float | None = None) -> ClockStatus:
         server = self._parse(server_time)
         local = self.local_now().astimezone(timezone.utc)
-        drift = (local - server).total_seconds()
-        self._server_anchor = server
-        self._mono_anchor = self.monotonic()
-        if abs(drift) > self.threshold_seconds:
+        drift = drift_seconds if drift_seconds is not None else (local - server).total_seconds()
+        with self._mutex:
+            if threshold_seconds is not None:
+                self.threshold_seconds = threshold_seconds
+            self._server_anchor = server
+            self._mono_anchor = self.monotonic()
+            drifted = not clock_trusted if clock_trusted is not None else abs(drift) > self.threshold_seconds
+            self.status = ClockStatus(drift, drifted, server)
+        if drifted:
             with sqlite3.connect(self.path) as db:
                 db.execute(
                     "INSERT INTO clock_events(local_time, server_time, drift_seconds, threshold_seconds, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (local.isoformat(), server.isoformat(), drift, self.threshold_seconds, datetime.now(timezone.utc).isoformat()),
+                    (local.isoformat(), server.isoformat(), drift, self.threshold_seconds, server.isoformat()),
                 )
-        return ClockStatus(drift, abs(drift) > self.threshold_seconds, server)
+        return ClockStatus(drift, drifted, server)
 
     def trusted_now(self) -> datetime:
-        if self._server_anchor is None or self._mono_anchor is None:
-            return self.local_now().astimezone()
-        return (self._server_anchor + timedelta(seconds=max(0, self.monotonic() - self._mono_anchor))).astimezone()
+        with self._mutex:
+            if self._server_anchor is None or self._mono_anchor is None:
+                raise RuntimeError("Trusted clock requires a successful heartbeat after startup")
+            return (self._server_anchor + timedelta(seconds=max(0, self.monotonic() - self._mono_anchor))).astimezone(self._timezone)

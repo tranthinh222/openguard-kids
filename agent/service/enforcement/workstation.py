@@ -19,6 +19,7 @@ class EnforcementReason(StrEnum):
     QUOTA_EXHAUSTED = "quota_exhausted"
     SCHEDULE_DISALLOWED = "schedule_disallowed"
     REMOTE_LOCK = "remote_lock"
+    CLOCK_UNVERIFIED = "clock_unverified"
 
 
 def _windows_lock() -> bool:

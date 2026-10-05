@@ -2,6 +2,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from service.clock import ClockMonitor
+import pytest
 
 
 def test_clock_drift_threshold_and_trusted_monotonic_time(tmp_path):
@@ -25,3 +26,25 @@ def test_clock_drift_at_threshold_is_not_an_event(tmp_path):
         local_now=lambda: datetime(2026, 10, 5, 12, 2, tzinfo=timezone.utc),
     )
     assert monitor.synchronize("2026-10-05T12:00:00Z").drifted is False
+
+
+def test_restart_requires_new_sync_instead_of_trusting_changed_local_date(tmp_path):
+    path = tmp_path / "agent.db"
+    old = ClockMonitor(path)
+    old.synchronize("2026-10-05T12:00:00Z")
+    restarted = ClockMonitor(path, local_now=lambda: datetime(2040, 1, 1, tzinfo=timezone.utc))
+    assert not restarted.ready
+    with pytest.raises(RuntimeError, match="successful heartbeat"):
+        restarted.trusted_now()
+
+
+def test_server_classification_and_audit_use_server_time(tmp_path):
+    path = tmp_path / "agent.db"
+    monitor = ClockMonitor(path, local_now=lambda: datetime(2040, 1, 1, tzinfo=timezone.utc))
+    status = monitor.synchronize("2026-10-05T12:00:00Z", clock_trusted=False,
+                                 drift_seconds=31, threshold_seconds=30)
+    assert status.drifted and status.drift_seconds == 31
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT created_at FROM clock_events").fetchone()[0] == "2026-10-05T12:00:00+00:00"
+    assert not monitor.synchronize("2026-10-05T12:00:00Z", clock_trusted=True,
+                                   drift_seconds=0, threshold_seconds=30).drifted

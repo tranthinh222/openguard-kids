@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 class Settings(BaseSettings):
     app_name: str = "OpenGuard Kids Server"
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
     device_access_token_expire_minutes: int = 15
     device_refresh_token_expire_days: int = 30
     enrollment_code_expire_minutes: int = 10
+    agent_clock_drift_threshold_sec: float = Field(default=120, gt=0, allow_inf_nan=False)
 
     web_session_expire_hours: int = 12
     web_cookie_secure: bool = False

@@ -15,6 +15,7 @@ from openguard_agent import AgentClient, AgentConfig, AgentNotEnrolledError, Age
 from service.policy import PolicyRepository
 from service.policy.models import Policy
 from service.screen_time.counter import TickResult
+from service.clock import ClockMonitor
 
 NETWORK_ERROR = "Không kết nối được server. Kiểm tra Internet và thử lại."
 
@@ -104,6 +105,8 @@ def format_remaining(result: TickResult | None) -> str:
         return "—"
     if result.reason == "no_policy":
         return "Chưa có chính sách"
+    if result.reason in {"clock_sync_pending", "clock_unverified"}:
+        return "Đang chờ xác minh giờ máy chủ"
     if result.reason == "remote_lock":
         return "Phụ huynh đang khóa"
     if result.reason == "outside_schedule":
@@ -149,6 +152,7 @@ class AgentController:
     def __init__(self, config: AgentConfig | None = None):
         self.config = config or AgentConfig.from_env()
         self.store = StateStore(self.config.state_path)
+        self.clock_monitor = ClockMonitor(self.config.database_path or self.config.state_path.with_name("agent.db"))
         # Commands arrive over WebSocket or heartbeat; both report through this callback.
         self.on_command_event: Callable[[dict], None] | None = None
 
@@ -167,7 +171,8 @@ class AgentController:
             client.close()
 
     def heartbeat(self) -> dict:
-        client = AgentClient(self.config, self.store, on_command_event=self.on_command_event)
+        client = AgentClient(self.config, self.store, on_command_event=self.on_command_event,
+                             clock_monitor=self.clock_monitor)
         try:
             return client.heartbeat()
         finally:
@@ -249,13 +254,15 @@ class ProtectionWorker:
         self._stop.set()
 
     def _run(self, stop: threading.Event) -> None:
-        client = AgentClient(self.controller.config, self.controller.store, on_command_event=self.on_event)
+        client = AgentClient(self.controller.config, self.controller.store, on_command_event=self.on_event,
+                             clock_monitor=self.controller.clock_monitor)
         websocket = None
         try:
             counter = client.screen_time_counter(self.on_event)
             websocket = client.websocket_worker()
-            websocket.start()
             while not stop.is_set():
+                if self.controller.clock_monitor.ready:
+                    websocket.start()
                 result = counter.tick()
                 self.latest = result
                 for event in result.events:
