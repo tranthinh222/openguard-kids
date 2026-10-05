@@ -522,7 +522,7 @@ Wall clock chỉ dùng để xác định ngày và schedule. `time.monotonic()`
 **Tại sao:** nếu không cập nhật mốc monotonic trong lúc idle, toàn bộ khoảng
 idle có thể bị cộng nhầm khi người dùng hoạt động trở lại.
 
-#### `agent/tests/test_screen_time.py` — file đã mở rộng
+#### `agent/tests/test_idle_detection.py` — file mới
 
 - Test idle ở 299 giây vẫn tính.
 - Test idle từ 300 giây không tính.
@@ -944,6 +944,7 @@ agent/tests/test_screen_time.py
 agent/tests/test_clock_monitor.py
 agent/tests/test_commands.py
 agent/tests/test_extra_time.py
+agent/tests/test_idle_detection.py
 agent/tests/test_warning_grace.py
 agent/tests/test_websocket_client.py
 agent/tests/test_weekly_schedule.py
