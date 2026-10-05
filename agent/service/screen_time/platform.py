@@ -17,7 +17,7 @@ def idle_seconds() -> float:
     info = _LastInputInfo()
     info.cbSize = ctypes.sizeof(info)
     if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
-        return 0.0
+        raise OSError("GetLastInputInfo failed")
     elapsed_ms = (ctypes.windll.kernel32.GetTickCount() - info.dwTime) & 0xFFFFFFFF
     return elapsed_ms / 1000.0
 
@@ -35,4 +35,3 @@ def is_session_unlocked() -> bool:
         return False
     ctypes.windll.user32.CloseDesktop(desktop)
     return True
-

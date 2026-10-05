@@ -217,9 +217,9 @@ thường dùng để trẻ lưu bài hoặc đóng ứng dụng sau khi quota h
 dụng kết thúc.
 
 Ví dụ `grace_period_sec = 60` có nghĩa là cho thêm 60 giây trước khi khóa máy.
-Chỉ số này hiện **đã được nhận và validate trong policy nhưng chưa được áp dụng
-vào logic khóa**. Phiên bản hiện tại yêu cầu khóa ngay khi quota về 0 hoặc ra
-ngoài lịch.
+Chỉ số này **đã được thực thi** bằng monotonic deadline. Phiên bản hiện tại bắt
+đầu grace khi quota về 0 và khóa khi grace kết thúc; ngoài weekly schedule vẫn
+khóa ngay để đáp ứng SLA năm giây.
 
 #### Warning
 
@@ -234,8 +234,8 @@ Ví dụ:
 
 nghĩa là hiển thị cảnh báo khi quota còn 10 phút, 5 phút và 1 phút. Các giá trị
 được loại bỏ trùng lặp, sắp xếp giảm dần và phải nằm trong khoảng 1–60 phút.
-Chỉ số này hiện **đã được model và validate nhưng chưa có UI/thông báo thực
-thi**.
+Chỉ số này **đã được thực thi**: counter phát `TIME_WARNING`, lưu trạng thái
+chống lặp trong SQLite và desktop GUI hiển thị banner cảnh báo.
 
 Tóm tắt trạng thái hiện tại:
 
@@ -244,8 +244,8 @@ Tóm tắt trạng thái hiện tại:
 | `weekday_minutes` | phút/ngày | Quota từ thứ Hai đến thứ Sáu | Đã thực thi |
 | `weekend_minutes` | phút/ngày | Quota thứ Bảy và Chủ Nhật | Đã thực thi |
 | `idle_timeout_sec` | giây | Ngưỡng không thao tác để ngừng tính usage | Đã thực thi |
-| `grace_period_sec` | giây | Thời gian gia hạn trước khi khóa | Chưa thực thi |
-| `warning_minutes` | phút còn lại | Các mốc hiển thị cảnh báo | Chưa thực thi |
+| `grace_period_sec` | giây | Thời gian gia hạn trước khi khóa | Đã thực thi |
+| `warning_minutes` | phút còn lại | Các mốc hiển thị cảnh báo | Đã thực thi |
 
 ### Last-known-good policy
 
@@ -478,11 +478,10 @@ Khi heartbeat, `used_seconds` của ngày hiện tại được gửi lên serve
 Trên hệ điều hành không phải Windows, các hàm được thiết kế để code vẫn chạy
 và test được, nhưng thao tác khóa workstation trả về `False`.
 
-## Kế hoạch triển khai tiếp theo
+## Các chức năng Week 02 đã triển khai tiếp theo
 
-Các mục 3–9 dưới đây là **kế hoạch**, chưa phải toàn bộ chức năng đã hoàn thành.
-Một số nền tảng đã có từ Policy Manager và Screen-Time Counter; mỗi mục ghi rõ
-phần có thể tái sử dụng và phần cần bổ sung.
+Các mục 3–9 dưới đây đã được nối vào Agent service và desktop GUI. Mỗi mục ghi
+rõ file đã thêm/sửa, trách nhiệm và acceptance test tương ứng.
 
 ## 3. Idle Detection
 
@@ -501,7 +500,7 @@ Wall clock chỉ dùng để xác định ngày và schedule. `time.monotonic()`
 để tính elapsed active time; tuyệt đối không lấy hiệu hai wall-clock timestamp
 để cộng usage.
 
-### File sẽ sửa
+### File đã sửa
 
 #### `agent/service/screen_time/platform.py`
 
@@ -523,7 +522,7 @@ Wall clock chỉ dùng để xác định ngày và schedule. `time.monotonic()`
 **Tại sao:** nếu không cập nhật mốc monotonic trong lúc idle, toàn bộ khoảng
 idle có thể bị cộng nhầm khi người dùng hoạt động trở lại.
 
-#### `agent/tests/test_idle_detection.py` — file mới
+#### `agent/tests/test_screen_time.py` — file đã mở rộng
 
 - Test idle ở 299 giây vẫn tính.
 - Test idle từ 300 giây không tính.
@@ -550,7 +549,7 @@ slot = weekday * 48 + hour * 2 + (1 nếu minute >= 30, ngược lại là 0)
 Python `datetime.weekday()` trả thứ Hai là `0` và Chủ Nhật là `6`, phù hợp với
 công thức này.
 
-### File sẽ sửa/thêm
+### File đã sửa/thêm
 
 #### `agent/service/policy/models.py`
 
@@ -603,18 +602,16 @@ Em có 60 giây để lưu bài.
 
 Sau `grace_period_sec`, Agent khóa workstation.
 
-### File sẽ thêm/sửa
+### File đã thêm/sửa
 
-#### `agent/service/screen_time/warnings.py` — file mới
+#### `agent/service/screen_time/counter.py` — đã bổ sung warning state machine
 
 - Tính các threshold được vượt qua giữa hai tick.
-- Phát event `TIME_WARNING` và `GRACE_STARTED`.
+- Phát event `TIME_WARNING`, `GRACE_STARTED` và `GRACE_TICK`.
 - Mỗi warning chỉ phát một lần cho mỗi ngày/policy session.
 
 **Tại sao:** warning là state machine riêng, không nên nhét logic UI vào
 `ScreenTimeCounter`.
-
-#### `agent/service/screen_time/counter.py`
 
 - Trả thêm event khi remaining time đi qua warning threshold.
 - Khi quota về 0, bắt đầu grace period thay vì khóa ngay.
@@ -642,7 +639,7 @@ hiển thị lặp lại.
 - Hiển thị nội dung warning và countdown grace period trên tray/status UI.
 - UI chỉ render event, không tự tính quota.
 
-#### `agent/tests/test_warnings.py` — file mới
+#### `agent/tests/test_warning_grace.py` — file mới
 
 - Test tick nhảy qua nhiều threshold vẫn phát đủ warning cần thiết một lần.
 - Test restart không phát lại warning đã lưu.
@@ -667,7 +664,7 @@ Có một wrapper enforcement duy nhất gọi Windows `LockWorkStation()` khi:
 
 Không kill process, shutdown hoặc restart máy.
 
-### File sẽ thêm/sửa
+### File đã thêm/sửa
 
 #### `agent/service/enforcement/__init__.py` — file mới
 
@@ -723,7 +720,7 @@ drift > 120 giây → ghi CLOCK_DRIFT_DETECTED
 Khi phát hiện drift, Agent không reset ngày usage, không tăng quota và không
 chuyển sang schedule/quota của ngày khác chỉ vì local clock vừa bị chỉnh.
 
-### File sẽ thêm/sửa
+### File đã thêm/sửa
 
 #### `agent/service/clock/monitor.py` — file mới
 
@@ -785,7 +782,7 @@ API server hiện đã tồn tại và chấp nhận từ 5 đến 120 phút. Kh
 server phát command `ADD_TIME`; Agent cộng số phút được duyệt vào
 `bonus_seconds` của ngày hiện tại.
 
-### File sẽ thêm/sửa
+### File đã thêm/sửa
 
 #### `agent/service/requests/client.py` — file mới
 
@@ -856,15 +853,12 @@ Agent ACK theo protocol server hiện tại:
 }
 ```
 
-### File sẽ thêm/sửa
-
-#### `agent/service/commands/models.py` — file mới
-
-- Validate `command_id`, command type và payload.
-- Định nghĩa kết quả `completed`/`failed` dùng để tạo ACK.
+### File đã thêm/sửa
 
 #### `agent/service/commands/handler.py` — file mới
 
+- Validate `command_id`, command type và payload qua command handler.
+- Định nghĩa `CommandResult` với kết quả `completed`/`failed` dùng để tạo ACK.
 - Route `LOCK_NOW` đến Workstation Enforcer.
 - Route `ADD_TIME` đến Usage Repository.
 - Xử lý `UNLOCK` như bỏ trạng thái khóa do policy/remote command; lưu ý Windows
@@ -901,7 +895,7 @@ Agent ACK theo protocol server hiện tại:
 - ACK phản ánh đúng kết quả side effect.
 - Mất WebSocket không làm mất command vì heartbeat/queued commands là fallback.
 
-### Thứ tự triển khai đề xuất
+### Thứ tự đã triển khai
 
 ```text
 3. Hoàn thiện Idle Detection
@@ -917,8 +911,8 @@ Agent ACK theo protocol server hiện tại:
 8. Extra-Time Request + ADD_TIME
 ```
 
-Workstation Enforcer nên làm cùng Weekly Schedule vì đây là dependency trực
-tiếp để đạt yêu cầu khóa trong năm giây. Command Handler nên có trước khi nối
+Workstation Enforcer được làm cùng Weekly Schedule vì đây là dependency trực
+tiếp để đạt yêu cầu khóa trong năm giây. Command Handler được tách khỏi
 WebSocket để transport chỉ chịu trách nhiệm truyền nhận, không chứa nghiệp vụ.
 
 ## 10. Cấu hình và chạy Agent
@@ -947,6 +941,12 @@ Các test mới nằm tại:
 ```text
 agent/tests/test_policy_manager.py
 agent/tests/test_screen_time.py
+agent/tests/test_clock_monitor.py
+agent/tests/test_commands.py
+agent/tests/test_extra_time.py
+agent/tests/test_warning_grace.py
+agent/tests/test_websocket_client.py
+agent/tests/test_weekly_schedule.py
 ```
 
 Các trường hợp chính đã được kiểm tra:
@@ -959,14 +959,21 @@ Các trường hợp chính đã được kiểm tra:
 - Quota ba phút khóa máy sau 180 giây active usage.
 - Thời gian idle và session bị khóa không được tính.
 - Ngoài weekly schedule thì không cộng usage và yêu cầu khóa.
+- Clock drift vượt 120 giây được ghi nhận và trusted time đi theo monotonic.
+- Warning không lặp lại sau khi tạo counter mới.
+- Grace period khóa đúng theo monotonic deadline.
+- `ADD_TIME` idempotent và cộng đúng bonus seconds.
+- `LOCK_NOW`/`UNLOCK` đi qua command handler và Workstation Enforcer.
+- WebSocket command tạo ACK đúng protocol.
 
 ## 12. Phần chưa triển khai trong phạm vi hiện tại
 
 - Đồng bộ `security_events` từ Agent lên server.
-- Hiển thị cảnh báo tại các mốc `warning_minutes`.
-- Áp dụng `grace_period_sec` trước khi khóa.
-- Nhận bonus time từ command server và gọi `set_bonus()` tự động.
 - Enforcement cho danh sách `apps` và `domains`.
+- Windows không cho ứng dụng tự mở khóa secure desktop; `UNLOCK` chỉ gỡ trạng
+  thái enforcement nội bộ, người dùng vẫn phải xác thực vào Windows.
+- Grace deadline đang giữ trong memory; nếu Agent restart đúng lúc grace đang
+  chạy, phiên grace sẽ bắt đầu lại.
 
 Các field trên đã được model/validate khi phù hợp, nhưng cần thêm service xử lý
 riêng để hoàn thiện toàn bộ yêu cầu Week 02.

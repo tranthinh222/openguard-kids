@@ -286,7 +286,11 @@ class AgentClient:
             token_provider=lambda: self.store.load().access_token or "",
             handler=self.command_handler,
             verify_tls=self.config.verify_tls,
+            on_auth_failure=self._refresh_for_websocket,
         )
+
+    def _refresh_for_websocket(self) -> None:
+        self._refresh_access_token(self.store.load())
 
     def _send_heartbeat(self, state: AgentState) -> httpx.Response:
         return self.http.post(

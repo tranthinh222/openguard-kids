@@ -31,12 +31,14 @@ class WebSocketWorker:
         handler: CommandHandler,
         verify_tls: bool = True,
         connector=connect,
+        on_auth_failure: Callable[[], None] | None = None,
     ):
         self.url = websocket_url(server_url)
         self.token_provider = token_provider
         self.handler = handler
         self.verify_tls = verify_tls
         self.connector = connector
+        self.on_auth_failure = on_auth_failure
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -76,6 +78,15 @@ class WebSocketWorker:
                         }))
             except Exception as exc:
                 if not self._stop.is_set():
+                    received = getattr(exc, "rcvd", None)
+                    response = getattr(exc, "response", None)
+                    code = getattr(received, "code", None)
+                    status = getattr(response, "status_code", None)
+                    if self.on_auth_failure is not None and (code in {4401, 4403} or status in {401, 403}):
+                        try:
+                            self.on_auth_failure()
+                        except Exception as refresh_exc:
+                            LOGGER.warning("WebSocket token refresh failed: %s", refresh_exc)
                     LOGGER.warning("WebSocket disconnected: %s", exc)
                     self._stop.wait(backoff + random.uniform(0, backoff * 0.2))
                     backoff = min(backoff * 2, 30)
