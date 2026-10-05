@@ -917,19 +917,26 @@ WebSocket để transport chỉ chịu trách nhiệm truyền nhận, không ch
 
 ## 10. Cấu hình và chạy Agent
 
-Ví dụ trên Windows PowerShell:
+Server và Agent cùng đọc file `.env` ở thư mục gốc dự án. File thật đã được
+thêm vào `.gitignore`; `.env.example` là template có thể commit. Hai giá trị
+`POLICY_HMAC_SECRET` và `OGK_POLICY_HMAC_SECRET` trong `.env` phải giống nhau.
+
+Với cấu hình local mặc định, không cần chạy `export` hoặc gán `$env:` thủ công.
+Các biến môi trường hệ thống vẫn được ưu tiên hơn giá trị trong file nếu cần
+override khi deploy.
+
+Chạy Agent trên Windows PowerShell:
 
 ```powershell
-$env:OGK_SERVER_URL="http://127.0.0.1:8000"
-$env:OGK_POLICY_HMAC_SECRET="<giống secret phía server>"
-$env:OGK_USAGE_TICK_SEC="1"
 python agent/openguard_agent.py run
 ```
 
-Có thể đổi vị trí SQLite bằng:
+Muốn đổi server, tick interval hoặc vị trí SQLite thì chỉnh `.env`, ví dụ:
 
-```powershell
-$env:OGK_DATABASE_PATH="C:\ProgramData\OpenGuardKids\agent.db"
+```dotenv
+OGK_SERVER_URL=http://192.168.1.10:8000
+OGK_USAGE_TICK_SEC=1
+OGK_DATABASE_PATH=C:\ProgramData\OpenGuardKids\agent.db
 ```
 
 Nếu không cấu hình, `agent.db` được đặt cạnh file trạng thái Agent.

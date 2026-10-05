@@ -21,10 +21,10 @@ GUI tự khởi động heartbeat.
 
 ## Policy và screen time (Week 02)
 
-Đặt cùng HMAC secret với server trước khi chạy service:
+Agent tự đọc file `.env` ở thư mục gốc dự án. Bảo đảm
+`OGK_POLICY_HMAC_SECRET` giống `POLICY_HMAC_SECRET` của server, sau đó chạy:
 
 ```powershell
-$env:OGK_POLICY_HMAC_SECRET="<same secret as server>"
 python openguard_agent.py run
 ```
 

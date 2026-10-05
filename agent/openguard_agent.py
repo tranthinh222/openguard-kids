@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import httpx
+from dotenv import load_dotenv
 
 from service.policy import PolicyManager, PolicyRejectedError, PolicyRepository
 from service.clock import ClockMonitor
@@ -37,6 +38,9 @@ from service.screen_time import (
 
 AGENT_VERSION = "0.3.0"
 LOGGER = logging.getLogger("openguard-agent")
+
+# Load one shared project-level file; real environment variables take priority.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 
 
 def default_state_path() -> Path:
