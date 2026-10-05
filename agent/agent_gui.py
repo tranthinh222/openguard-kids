@@ -17,6 +17,7 @@ from typing import Callable
 from gui_controller import (
     AgentController,
     HeartbeatWorker,
+    ProtectionWorker,
     describe_error,
     format_sync_time,
     is_network_error,
@@ -204,6 +205,7 @@ class AgentWindow:
         self.controller = AgentController()
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.worker = HeartbeatWorker(self.controller, self._queue_heartbeat)
+        self.protection = ProtectionWorker(self.controller, self._queue_protection_event)
         self.server_var = tk.StringVar(value=self.controller.config.server_url)
         self.code_var = tk.StringVar()
         self.connection = "checking"  # checking | ok | offline | rejected | error
@@ -478,6 +480,7 @@ class AgentWindow:
         if enrolled:
             self._show_status_view()
             self.worker.start()
+            self.protection.start()
             self._refresh_status()
         else:
             self._show_pair_view()
@@ -623,12 +626,14 @@ class AgentWindow:
 
     def _start_repair(self) -> None:
         self.worker.stop()
+        self.protection.stop()
         self.code_var.set("")
         self._show_pair_view(allow_back=True)
 
     def _back_to_status(self) -> None:
         self._show_status_view()
         self.worker.start()
+        self.protection.start()
         self._refresh_status()
 
     # ------------------------------------------------------------ heartbeat
@@ -636,9 +641,11 @@ class AgentWindow:
     def _toggle_service(self) -> None:
         if self.worker.running:
             self.worker.stop()
+            self.protection.stop()
         else:
             self.connection = "checking"
             self.worker.start()
+            self.protection.start()
         self._refresh_status()
 
     def _check_connection(self) -> None:
@@ -669,6 +676,9 @@ class AgentWindow:
     def _queue_heartbeat(self, result: dict | None, error: Exception | None) -> None:
         self.events.put(("heartbeat", (result, error)))
 
+    def _queue_protection_event(self, event: dict) -> None:
+        self.events.put(("protection", event))
+
     def _apply_heartbeat(self, result: dict | None, error: Exception | None) -> None:
         if error is None:
             self.connection, self.connection_error = "ok", ""
@@ -692,6 +702,7 @@ class AgentWindow:
                     self.connection, self.policy_version = "checking", None
                     self._show_status_view()
                     self.worker.start()
+                    self.protection.start()
                     self._refresh_status()
                     self._show_banner("Ghép thiết bị thành công.")
                 elif event == "enroll_error":
@@ -719,12 +730,24 @@ class AgentWindow:
                         self._show_banner("Đã gửi yêu cầu thêm 15 phút. Đang chờ phụ huynh duyệt.")
                     else:
                         self._show_banner(describe_error(error), "error")
+                elif event == "protection":
+                    kind = payload.get("type")
+                    if kind == "TIME_WARNING":
+                        self._show_banner(f"Còn {payload['minutes_remaining']} phút sử dụng.", "warning")
+                    elif kind == "GRACE_STARTED":
+                        self._show_banner(
+                            f"Thời gian sử dụng hôm nay đã hết. Em có {payload['seconds_remaining']} giây để lưu bài.",
+                            "warning",
+                        )
+                    elif kind == "PROTECTION_ERROR":
+                        self._show_banner(describe_error(payload["error"]), "error")
         except queue.Empty:
             pass
         self.root.after(100, self._process_events)
 
     def _close(self) -> None:
         self.worker.stop()
+        self.protection.stop()
         self.root.destroy()
 
 

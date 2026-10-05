@@ -86,8 +86,11 @@ class Policy:
         )
 
     def is_allowed_at(self, moment) -> bool:
-        slot = moment.weekday() * 48 + moment.hour * 2 + moment.minute // 30
-        return self.weekly_schedule[slot]
+        return self.weekly_schedule[self.schedule_slot_at(moment)]
+
+    @staticmethod
+    def schedule_slot_at(moment) -> int:
+        return moment.weekday() * 48 + moment.hour * 2 + (1 if moment.minute >= 30 else 0)
 
     def quota_seconds_at(self, moment) -> int:
         minutes = self.screen_time.weekend_minutes if moment.weekday() >= 5 else self.screen_time.weekday_minutes

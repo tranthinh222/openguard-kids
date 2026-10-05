@@ -275,12 +275,10 @@ class AgentClient:
         if not command_id:
             return
         state = state or self.store.load()
-        response = self.http.post(
+        self._authorized_post(
             f"/api/v1/agent/commands/{command_id}/ack",
-            headers={"Authorization": f"Bearer {state.access_token}"},
-            json={"status": status, "error": error},
+            {"status": status, "error": error},
         )
-        response.raise_for_status()
 
     def websocket_worker(self) -> WebSocketWorker:
         return WebSocketWorker(
