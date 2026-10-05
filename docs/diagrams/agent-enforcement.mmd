@@ -1,0 +1,16 @@
+flowchart LR
+    Q["Hết quota<br/>sau ân hạn"] --> E
+    S["Ngoài khung giờ<br/>lịch tuần"] --> E
+    R["Lệnh LOCK_NOW<br/>từ phụ huynh"] --> Flag[("remote_lock<br/>lưu trong agent.db")]
+    Flag --> E
+
+    E["WorkstationEnforcer<br/>một điểm khóa duy nhất"] --> Pending{"Đã yêu cầu khóa<br/>và chưa khóa xong?"}
+    Pending -- "Rồi" --> NoOp["Bỏ qua,<br/>không gọi lặp"]
+    Pending -- "Chưa" --> Win["Windows<br/>LockWorkStation"]
+
+    Win --> Locked["Màn hình khóa"]
+    Locked -- "Trẻ nhập mật khẩu" --> Check{"Lý do khóa<br/>còn hiệu lực?"}
+    Check -- "Còn" --> E
+    Check -- "Hết" --> Use["Dùng máy bình thường"]
+
+    U["Lệnh UNLOCK<br/>hoặc ADD_TIME"] -. "gỡ lý do khóa" .-> Check
