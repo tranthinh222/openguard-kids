@@ -112,6 +112,13 @@ class AgentController:
         finally:
             client.close()
 
+    def request_extra_time(self, minutes: int = 15) -> dict:
+        client = AgentClient(self.config, self.store)
+        try:
+            return client.request_extra_time(minutes)
+        finally:
+            client.close()
+
 
 class HeartbeatWorker:
     def __init__(self, controller: AgentController, on_result: Callable[[dict | None, Exception | None], None]):
@@ -145,3 +152,47 @@ class HeartbeatWorker:
             if not stop.is_set():
                 self.on_result(result, error)
             stop.wait(self.controller.config.heartbeat_interval_sec)
+
+
+class ProtectionWorker:
+    """Run screen-time enforcement and real-time commands outside Tk."""
+
+    def __init__(self, controller: AgentController, on_event: Callable[[dict], None]):
+        self.controller = controller
+        self.on_event = on_event
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self) -> None:
+        if self.running:
+            return
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, args=(self._stop,), name="openguard-protection", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _run(self, stop: threading.Event) -> None:
+        client = AgentClient(self.controller.config, self.controller.store)
+        websocket = None
+        try:
+            counter = client.screen_time_counter(self.on_event)
+            websocket = client.websocket_worker()
+            websocket.start()
+            while not stop.is_set():
+                result = counter.tick()
+                for event in result.events:
+                    if event.get("type") == "GRACE_TICK":
+                        self.on_event(event)
+                stop.wait(min(self.controller.config.usage_tick_sec, 5.0))
+        except Exception as exc:
+            self.on_event({"type": "PROTECTION_ERROR", "error": exc})
+        finally:
+            if websocket is not None:
+                websocket.stop()
+            client.close()

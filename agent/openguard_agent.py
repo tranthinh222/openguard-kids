@@ -18,20 +18,24 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
 from service.policy import PolicyManager, PolicyRejectedError, PolicyRepository
+from service.clock import ClockMonitor
+from service.commands import CommandHandler, ProcessedCommandRepository
+from service.enforcement import WorkstationEnforcer
+from service.realtime import WebSocketWorker
+from service.requests import ExtraTimeClient
 from service.screen_time import (
     ScreenTimeCounter,
     UsageRepository,
     is_session_unlocked,
     is_user_active,
-    lock_workstation,
 )
 
-AGENT_VERSION = "0.2.0"
+AGENT_VERSION = "0.3.0"
 LOGGER = logging.getLogger("openguard-agent")
 
 
@@ -96,31 +100,34 @@ class AgentState:
 class StateStore:
     def __init__(self, path: Path):
         self.path = path
+        self._mutex = threading.RLock()
 
     def load(self) -> AgentState:
-        if not self.path.exists():
-            return AgentState()
-        try:
-            return AgentState(**json.loads(self.path.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError, TypeError) as exc:
-            raise RuntimeError(f"Cannot read agent state at {self.path}: {exc}") from exc
+        with self._mutex:
+            if not self.path.exists():
+                return AgentState()
+            try:
+                return AgentState(**json.loads(self.path.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError, TypeError) as exc:
+                raise RuntimeError(f"Cannot read agent state at {self.path}: {exc}") from exc
 
     def save(self, state: AgentState) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=self.path.parent, prefix=f".{self.path.name}.", text=True
-        )
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(asdict(state), handle, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temporary_name, 0o600)
-            os.replace(temporary_name, self.path)
-        finally:
-            if os.path.exists(temporary_name):
-                os.unlink(temporary_name)
+        with self._mutex:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary_name = tempfile.mkstemp(
+                dir=self.path.parent, prefix=f".{self.path.name}.", text=True
+            )
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    json.dump(asdict(state), handle, indent=2)
+                    handle.write("\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temporary_name, 0o600)
+                os.replace(temporary_name, self.path)
+            finally:
+                if os.path.exists(temporary_name):
+                    os.unlink(temporary_name)
 
 
 def device_name() -> str:
@@ -158,6 +165,13 @@ class AgentClient:
             if config.policy_hmac_secret else None
         )
         self.usage_repository = UsageRepository(database_path)
+        self.clock_monitor = ClockMonitor(database_path)
+        self.enforcer = WorkstationEnforcer()
+        self.command_handler = CommandHandler(
+            ProcessedCommandRepository(database_path), self.usage_repository,
+            self.enforcer, today=lambda: self.clock_monitor.trusted_now().date(),
+        )
+        self.extra_time = ExtraTimeClient(self._authorized_post)
 
     def close(self) -> None:
         self.http.close()
@@ -184,7 +198,7 @@ class AgentClient:
         state = self.store.load()
         if not state.enrolled:
             raise AgentNotEnrolledError("Agent is not enrolled; run enroll first")
-        usage = self.usage_repository.get_if_exists(datetime.now().astimezone().date())
+        usage = self.usage_repository.get_if_exists(self.clock_monitor.trusted_now().date())
         if usage is not None:
             state.quota_used_sec = int(usage.used_seconds)
         response = self._send_heartbeat(state)
@@ -198,8 +212,14 @@ class AgentClient:
             response = self._send_heartbeat(state)
         response.raise_for_status()
         payload: dict[str, Any] = response.json()
+        clock_status = self.clock_monitor.synchronize(payload["server_time"])
+        if clock_status.drifted:
+            LOGGER.warning("Local clock drift detected: %.1f seconds", clock_status.drift_seconds)
         if payload.get("policy_update_available") and self.policy_manager is not None:
             self._sync_policy(state)
+        for command in payload.get("commands", []):
+            result = self.command_handler.handle(command)
+            self._ack_command(result.command_id, result.status, result.error, state)
         state.last_heartbeat_at = datetime.now(timezone.utc).isoformat()
         state.last_server_time = payload["server_time"]
         self.store.save(state)
@@ -217,7 +237,7 @@ class AgentClient:
             return
         state.policy_version = policy.version
 
-    def screen_time_counter(self) -> ScreenTimeCounter:
+    def screen_time_counter(self, on_event: Callable[[dict], None] | None = None) -> ScreenTimeCounter:
         if self.policy_manager is None:
             raise RuntimeError("OGK_POLICY_HMAC_SECRET is required to enforce screen time")
         return ScreenTimeCounter(
@@ -225,7 +245,49 @@ class AgentClient:
             policy_provider=lambda: self.policy_manager.current,
             active_probe=is_user_active,
             unlocked_probe=is_session_unlocked,
-            locker=lock_workstation,
+            locker=lambda: False,
+            enforcer=self.enforcer,
+            now=self.clock_monitor.trusted_now,
+            on_event=on_event or (lambda event: LOGGER.info("Screen-time event: %s", event)),
+        )
+
+    def request_extra_time(self, minutes: int = 15) -> dict[str, Any]:
+        return self.extra_time.request(minutes)
+
+    def _authorized_post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        state = self.store.load()
+        if not state.enrolled:
+            raise AgentNotEnrolledError("Agent is not enrolled; run enroll first")
+        response = self.http.post(path, headers={"Authorization": f"Bearer {state.access_token}"}, json=body)
+        if response.status_code == 401:
+            self._refresh_access_token(state)
+            response = self.http.post(path, headers={"Authorization": f"Bearer {state.access_token}"}, json=body)
+        response.raise_for_status()
+        return response.json()
+
+    def _refresh_access_token(self, state: AgentState) -> None:
+        refresh = self.http.post("/api/v1/agent/token/refresh", json={"refresh_token": state.refresh_token})
+        refresh.raise_for_status()
+        state.access_token = refresh.json()["access_token"]
+        self.store.save(state)
+
+    def _ack_command(self, command_id: str, status: str, error: str | None, state: AgentState | None = None) -> None:
+        if not command_id:
+            return
+        state = state or self.store.load()
+        response = self.http.post(
+            f"/api/v1/agent/commands/{command_id}/ack",
+            headers={"Authorization": f"Bearer {state.access_token}"},
+            json={"status": status, "error": error},
+        )
+        response.raise_for_status()
+
+    def websocket_worker(self) -> WebSocketWorker:
+        return WebSocketWorker(
+            self.config.server_url,
+            token_provider=lambda: self.store.load().access_token or "",
+            handler=self.command_handler,
+            verify_tls=self.config.verify_tls,
         )
 
     def _send_heartbeat(self, state: AgentState) -> httpx.Response:
@@ -236,6 +298,7 @@ class AgentClient:
                 "policy_version": state.policy_version,
                 "agent_version": AGENT_VERSION,
                 "quota_used_sec": state.quota_used_sec,
+                "agent_wall_clock": datetime.now(timezone.utc).isoformat(),
             },
         )
 
@@ -261,6 +324,8 @@ def run_forever(client: AgentClient, interval: int) -> None:
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     counter = client.screen_time_counter()
+    websocket = client.websocket_worker()
+    websocket.start()
     next_heartbeat = 0.0
     LOGGER.info("Agent started; heartbeat interval=%s seconds", interval)
     while not stopped.is_set():
@@ -281,7 +346,8 @@ def run_forever(client: AgentClient, interval: int) -> None:
                 LOGGER.warning("Workstation lock requested: %s", result.reason)
         except (OSError, sqlite3.Error) as exc:
             LOGGER.error("Screen-time tick failed: %s", exc)
-        stopped.wait(client.config.usage_tick_sec)
+        stopped.wait(min(client.config.usage_tick_sec, 5.0))
+    websocket.stop()
 
 
 def main() -> int:

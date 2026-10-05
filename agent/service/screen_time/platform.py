@@ -36,8 +36,3 @@ def is_session_unlocked() -> bool:
     ctypes.windll.user32.CloseDesktop(desktop)
     return True
 
-
-def lock_workstation() -> bool:
-    if os.name != "nt":
-        return False
-    return bool(ctypes.windll.user32.LockWorkStation())

@@ -409,6 +409,8 @@ class AgentWindow:
         self.banner = tk.Label(body, font=self.f_small, wraplength=px(WRAP), justify="left", anchor="w", padx=px(12), pady=px(8))
         self.check_button = FlatButton(body, "Kiểm tra kết nối", self._check_connection, self.f_button)
         self.check_button.pack(fill="x", pady=(px(16), px(0)))
+        self.extra_time_button = FlatButton(body, "Xin thêm 15 phút", self._request_extra_time, self.f_button, variant="secondary")
+        self.extra_time_button.pack(fill="x", pady=(px(8), px(0)))
 
         self.details = Collapsible(view, "Thông tin thiết bị", self.f_body, self._fit_window)
         self.details.pack(pady=(px(12), px(0)))
@@ -653,6 +655,17 @@ class AgentWindow:
 
         threading.Thread(target=task, name="openguard-check", daemon=True).start()
 
+    def _request_extra_time(self) -> None:
+        self.extra_time_button.set_enabled(False, "Đang gửi yêu cầu...")
+
+        def task() -> None:
+            try:
+                self.events.put(("extra_time", (self.controller.request_extra_time(15), None)))
+            except Exception as exc:
+                self.events.put(("extra_time", (None, exc)))
+
+        threading.Thread(target=task, name="openguard-extra-time", daemon=True).start()
+
     def _queue_heartbeat(self, result: dict | None, error: Exception | None) -> None:
         self.events.put(("heartbeat", (result, error)))
 
@@ -699,6 +712,13 @@ class AgentWindow:
                                               "warning" if self.connection == "offline" else "error")
                     if self.status_view.winfo_ismapped():
                         self._refresh_status()
+                elif event == "extra_time":
+                    _result, error = payload
+                    self.extra_time_button.set_enabled(True, "Xin thêm 15 phút")
+                    if error is None:
+                        self._show_banner("Đã gửi yêu cầu thêm 15 phút. Đang chờ phụ huynh duyệt.")
+                    else:
+                        self._show_banner(describe_error(error), "error")
         except queue.Empty:
             pass
         self.root.after(100, self._process_events)
