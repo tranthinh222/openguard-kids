@@ -10,6 +10,7 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
+from datetime import datetime
 import tkinter.font as tkfont
 from pathlib import Path
 from typing import Callable
@@ -19,11 +20,13 @@ from gui_controller import (
     HeartbeatWorker,
     ProtectionWorker,
     describe_error,
+    format_remaining,
     format_sync_time,
     is_network_error,
     needs_reenroll,
     normalize_enrollment_code,
     normalize_server_url,
+    policy_summary,
 )
 from openguard_agent import AGENT_VERSION, device_name
 
@@ -218,6 +221,7 @@ class AgentWindow:
         self._build()
         self._show_initial_view()
         root.after(100, self._process_events)
+        root.after(1000, self._refresh_remaining)
         root.protocol("WM_DELETE_WINDOW", self._close)
 
     # ------------------------------------------------------------------ layout
@@ -403,6 +407,7 @@ class AgentWindow:
         rows_card = self._card(body, bg=BG, pad=14)
         rows_card.pack(fill="x")
         rows = rows_card.body  # type: ignore[attr-defined]
+        self.row_remaining = self._status_row(rows, "Còn lại hôm nay", dot=False)
         self.row_account = self._status_row(rows, "Tài khoản phụ huynh")
         self.row_service = self._status_row(rows, "Dịch vụ agent")
         self.row_server = self._status_row(rows, "Kết nối server")
@@ -414,6 +419,19 @@ class AgentWindow:
         self.check_button.pack(fill="x", pady=(px(16), px(0)))
         self.extra_time_button = FlatButton(body, "Xin thêm 15 phút", self._request_extra_time, self.f_button, variant="secondary")
         self.extra_time_button.pack(fill="x", pady=(px(8), px(0)))
+
+        self.policy_section = Collapsible(view, "Chính sách hiện tại", self.f_body, self._fit_window)
+        self.policy_section.pack(pady=(px(12), px(0)))
+        policy_card = self._card(self.policy_section.body, pad=16)
+        policy_card.pack(fill="x")
+        self.policy_rows = {
+            key: self._detail_row(policy_card.body, label)  # type: ignore[attr-defined]
+            for key, label in (
+                ("version", "Phiên bản"), ("weekday", "Ngày thường"), ("weekend", "Cuối tuần"),
+                ("schedule", "Giờ hôm nay"), ("idle", "Nghỉ thao tác"), ("warnings", "Cảnh báo"),
+                ("grace", "Ân hạn"),
+            )
+        }
 
         self.details = Collapsible(view, "Thông tin thiết bị", self.f_body, self._fit_window)
         self.details.pack(pady=(px(12), px(0)))
@@ -548,11 +566,18 @@ class AgentWindow:
             version = self.policy_version if self.policy_version is not None else state.policy_version
             self._set_row(self.row_policy, f"phiên bản {version}")
             self.detail_id.set(state.device_id or "—")
+        for key, text in policy_summary(self.controller.current_policy(), datetime.now().weekday()).items():
+            self.policy_rows[key].set(text)
         self.detail_name.set(device_name())
         self.detail_server.set(self.controller.config.server_url)
         self.service_button.configure(text="Tạm dừng đồng bộ" if running else "Tiếp tục đồng bộ")
         self.check_button.set_enabled(running and not self.checking,
                                       "Đang kiểm tra..." if self.checking else "Kiểm tra kết nối")
+
+    def _refresh_remaining(self) -> None:
+        """Keep the countdown live; the protection thread publishes one result per tick."""
+        self._set_row(self.row_remaining, format_remaining(self.protection.latest if self.protection.running else None))
+        self.root.after(1000, self._refresh_remaining)
 
     def _show_banner(self, text: str, kind: str = "success") -> None:
         fg, bg = {"success": (GREEN_DARK, GREEN_SOFT), "warning": ("#7a5410", AMBER_SOFT),

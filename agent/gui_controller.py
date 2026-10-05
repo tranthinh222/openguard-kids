@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 from dataclasses import replace
 from datetime import datetime
@@ -11,6 +12,9 @@ from urllib.parse import urlparse
 import httpx
 
 from openguard_agent import AgentClient, AgentConfig, AgentNotEnrolledError, AgentState, StateStore
+from service.policy import PolicyRepository
+from service.policy.models import Policy
+from service.screen_time.counter import TickResult
 
 NETWORK_ERROR = "Không kết nối được server. Kiểm tra Internet và thử lại."
 
@@ -86,6 +90,61 @@ def format_sync_time(value: str | None, now: datetime | None = None) -> str:
     return moment.strftime("%H:%M, %d/%m/%Y")
 
 
+def format_duration(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, minutes = total // 3600, (total % 3600) // 60
+    if hours:
+        return f"{hours} giờ {minutes} phút"
+    return f"{minutes} phút {total % 60:02d} giây"
+
+
+def format_remaining(result: TickResult | None) -> str:
+    """Describe today's remaining screen time from the latest enforcement tick."""
+    if result is None:
+        return "—"
+    if result.reason == "no_policy":
+        return "Chưa có chính sách"
+    if result.reason == "remote_lock":
+        return "Phụ huynh đang khóa"
+    if result.reason == "outside_schedule":
+        return "Ngoài khung giờ"
+    if result.reason in {"grace_period", "quota_exhausted"} or result.available_seconds <= 0:
+        return "Đã hết giờ"
+    return format_duration(result.available_seconds)
+
+
+def format_schedule(slots: tuple[bool, ...] | list[bool]) -> str:
+    """Turn one day's 48 half-hour slots into ranges such as 07:00–11:30, 13:00–21:00."""
+    if all(slots):
+        return "Cả ngày"
+    label = lambda slot: f"{slot // 2:02d}:{'30' if slot % 2 else '00'}"
+    ranges, start = [], None
+    for index, allowed in enumerate([*slots, False]):
+        if allowed and start is None:
+            start = index
+        elif not allowed and start is not None:
+            ranges.append(f"{label(start)}–{label(index)}")
+            start = None
+    return ", ".join(ranges) or "Không được dùng"
+
+
+def policy_summary(policy: Policy | None, weekday: int) -> dict[str, str]:
+    """Child-readable view of the active policy; `weekday` is Monday=0."""
+    if policy is None:
+        return {key: "—" for key in ("version", "weekday", "weekend", "schedule", "idle", "warnings", "grace")}
+    screen = policy.screen_time
+    return {
+        "version": str(policy.version),
+        "weekday": f"{screen.weekday_minutes} phút mỗi ngày",
+        "weekend": f"{screen.weekend_minutes} phút mỗi ngày",
+        "schedule": format_schedule(policy.weekly_schedule[weekday * 48:(weekday + 1) * 48]),
+        "idle": f"không tính sau {screen.idle_timeout_sec // 60} phút",
+        "warnings": "trước " + ", ".join(str(minute) for minute in screen.warning_minutes) + " phút"
+        if screen.warning_minutes else "không có",
+        "grace": f"{screen.grace_period_sec} giây để lưu bài",
+    }
+
+
 class AgentController:
     def __init__(self, config: AgentConfig | None = None):
         self.config = config or AgentConfig.from_env()
@@ -113,6 +172,14 @@ class AgentController:
             return client.heartbeat()
         finally:
             client.close()
+
+    def current_policy(self) -> Policy | None:
+        """The last verified policy cached in the agent database, if any."""
+        path = self.config.database_path or self.config.state_path.with_name("agent.db")
+        try:
+            return PolicyRepository(path).active()
+        except (OSError, ValueError, sqlite3.Error):
+            return None
 
     def request_extra_time(self, minutes: int = 15) -> dict:
         client = AgentClient(self.config, self.store)
@@ -162,6 +229,7 @@ class ProtectionWorker:
     def __init__(self, controller: AgentController, on_event: Callable[[dict], None]):
         self.controller = controller
         self.on_event = on_event
+        self.latest: TickResult | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -172,6 +240,7 @@ class ProtectionWorker:
     def start(self) -> None:
         if self.running:
             return
+        self.latest = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(self._stop,), name="openguard-protection", daemon=True)
         self._thread.start()
@@ -188,6 +257,7 @@ class ProtectionWorker:
             websocket.start()
             while not stop.is_set():
                 result = counter.tick()
+                self.latest = result
                 for event in result.events:
                     if event.get("type") == "GRACE_TICK":
                         self.on_event(event)
