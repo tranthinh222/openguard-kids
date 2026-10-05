@@ -19,6 +19,24 @@ Trên trang phụ huynh, mở hồ sơ trẻ và bấm **Tạo mã ghép đôi**
 8 ký tự vào cửa sổ agent rồi bấm **Ghép thiết bị**. Sau khi ghép thành công,
 GUI tự khởi động heartbeat.
 
+## Policy và screen time (Week 02)
+
+Đặt cùng HMAC secret với server trước khi chạy service:
+
+```powershell
+$env:OGK_POLICY_HMAC_SECRET="<same secret as server>"
+python openguard_agent.py run
+```
+
+Agent tải policy mới sau heartbeat, xác minh HMAC-SHA256 và schema rồi mới lưu
+vào SQLite (`agent.db`). Policy sai bị từ chối, policy tốt gần nhất vẫn được dùng
+và sự kiện `POLICY_REJECTED` được ghi vào bảng `security_events`.
+
+Service đếm active usage bằng `time.monotonic()` mỗi giây. Thời gian idle,
+session bị khóa và thời gian ngoài weekly schedule không được cộng. Tổng theo
+ngày và bonus được lưu trong bảng `usage_daily`; khi hết quota agent gọi API
+khóa workstation của Windows.
+
 Giao diện có hai trạng thái:
 
 - **Chưa ghép**: ô nhập mã lớn, thông báo lỗi ngay dưới ô nhập và phần

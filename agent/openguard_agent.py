@@ -10,8 +10,10 @@ import os
 import platform
 import signal
 import socket
+import sqlite3
 import tempfile
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -20,7 +22,16 @@ from typing import Any
 
 import httpx
 
-AGENT_VERSION = "0.1.0"
+from service.policy import PolicyManager, PolicyRejectedError, PolicyRepository
+from service.screen_time import (
+    ScreenTimeCounter,
+    UsageRepository,
+    is_session_unlocked,
+    is_user_active,
+    lock_workstation,
+)
+
+AGENT_VERSION = "0.2.0"
 LOGGER = logging.getLogger("openguard-agent")
 
 
@@ -38,6 +49,9 @@ class AgentConfig:
     heartbeat_interval_sec: int = 60
     request_timeout_sec: float = 10.0
     verify_tls: bool = True
+    database_path: Path | None = None
+    policy_hmac_secret: str | None = None
+    usage_tick_sec: float = 1.0
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -48,12 +62,19 @@ class AgentConfig:
         verify_tls = os.getenv("OGK_VERIFY_TLS", "true").lower() not in {
             "0", "false", "no", "off"
         }
+        state_path = Path(os.getenv("OGK_STATE_PATH", str(default_state_path())))
+        tick = float(os.getenv("OGK_USAGE_TICK_SEC", "1"))
+        if not 0.1 <= tick <= 30:
+            raise ValueError("Usage tick must be between 0.1 and 30 seconds")
         return cls(
             server_url=os.getenv("OGK_SERVER_URL", "http://127.0.0.1:8000").rstrip("/"),
-            state_path=Path(os.getenv("OGK_STATE_PATH", str(default_state_path()))),
+            state_path=state_path,
             heartbeat_interval_sec=interval,
             request_timeout_sec=timeout,
             verify_tls=verify_tls,
+            database_path=Path(os.getenv("OGK_DATABASE_PATH", str(state_path.with_name("agent.db")))),
+            policy_hmac_secret=os.getenv("OGK_POLICY_HMAC_SECRET") or None,
+            usage_tick_sec=tick,
         )
 
 
@@ -123,6 +144,7 @@ class AgentClient:
         store: StateStore,
         transport: httpx.BaseTransport | None = None,
     ):
+        self.config = config
         self.store = store
         self.http = httpx.Client(
             base_url=config.server_url,
@@ -130,6 +152,12 @@ class AgentClient:
             verify=config.verify_tls,
             transport=transport,
         )
+        database_path = config.database_path or config.state_path.with_name("agent.db")
+        self.policy_manager = (
+            PolicyManager(PolicyRepository(database_path), config.policy_hmac_secret)
+            if config.policy_hmac_secret else None
+        )
+        self.usage_repository = UsageRepository(database_path)
 
     def close(self) -> None:
         self.http.close()
@@ -156,6 +184,9 @@ class AgentClient:
         state = self.store.load()
         if not state.enrolled:
             raise AgentNotEnrolledError("Agent is not enrolled; run enroll first")
+        usage = self.usage_repository.get_if_exists(datetime.now().astimezone().date())
+        if usage is not None:
+            state.quota_used_sec = int(usage.used_seconds)
         response = self._send_heartbeat(state)
         if response.status_code == 401:
             refresh = self.http.post(
@@ -167,10 +198,35 @@ class AgentClient:
             response = self._send_heartbeat(state)
         response.raise_for_status()
         payload: dict[str, Any] = response.json()
+        if payload.get("policy_update_available") and self.policy_manager is not None:
+            self._sync_policy(state)
         state.last_heartbeat_at = datetime.now(timezone.utc).isoformat()
         state.last_server_time = payload["server_time"]
         self.store.save(state)
         return payload
+
+    def _sync_policy(self, state: AgentState) -> None:
+        response = self.http.get(
+            "/api/v1/agent/policy",
+            headers={"Authorization": f"Bearer {state.access_token}"},
+        )
+        response.raise_for_status()
+        try:
+            policy = self.policy_manager.accept(response.json())  # type: ignore[union-attr]
+        except PolicyRejectedError:
+            return
+        state.policy_version = policy.version
+
+    def screen_time_counter(self) -> ScreenTimeCounter:
+        if self.policy_manager is None:
+            raise RuntimeError("OGK_POLICY_HMAC_SECRET is required to enforce screen time")
+        return ScreenTimeCounter(
+            repository=self.usage_repository,
+            policy_provider=lambda: self.policy_manager.current,
+            active_probe=is_user_active,
+            unlocked_probe=is_session_unlocked,
+            locker=lock_workstation,
+        )
 
     def _send_heartbeat(self, state: AgentState) -> httpx.Response:
         return self.http.post(
@@ -204,19 +260,28 @@ def run_forever(client: AgentClient, interval: int) -> None:
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
+    counter = client.screen_time_counter()
+    next_heartbeat = 0.0
     LOGGER.info("Agent started; heartbeat interval=%s seconds", interval)
     while not stopped.is_set():
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            try:
+                reply = client.heartbeat()
+                LOGGER.info(
+                    "Heartbeat accepted; policy=%s update=%s commands=%s",
+                    reply["policy_version"], reply["policy_update_available"], len(reply.get("commands", [])),
+                )
+            except (httpx.HTTPError, RuntimeError, KeyError) as exc:
+                LOGGER.error("Heartbeat failed: %s", exc)
+            next_heartbeat = now + interval
         try:
-            reply = client.heartbeat()
-            LOGGER.info(
-                "Heartbeat accepted; policy=%s update=%s commands=%s",
-                reply["policy_version"],
-                reply["policy_update_available"],
-                len(reply.get("commands", [])),
-            )
-        except (httpx.HTTPError, RuntimeError, KeyError) as exc:
-            LOGGER.error("Heartbeat failed: %s", exc)
-        stopped.wait(interval)
+            result = counter.tick()
+            if result.should_lock:
+                LOGGER.warning("Workstation lock requested: %s", result.reason)
+        except (OSError, sqlite3.Error) as exc:
+            LOGGER.error("Screen-time tick failed: %s", exc)
+        stopped.wait(client.config.usage_tick_sec)
 
 
 def main() -> int:
