@@ -1,3 +1,3 @@
-from .workstation import EnforcementReason, WorkstationEnforcer
+from .workstation import EnforcementReason, RemoteLockRepository, WorkstationEnforcer
 
-__all__ = ["EnforcementReason", "WorkstationEnforcer"]
+__all__ = ["EnforcementReason", "RemoteLockRepository", "WorkstationEnforcer"]

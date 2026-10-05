@@ -5,8 +5,11 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+import sqlite3
 import time
+from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Callable
 
 LOGGER = logging.getLogger("openguard-agent.enforcement")
@@ -20,6 +23,33 @@ class EnforcementReason(StrEnum):
 
 def _windows_lock() -> bool:
     return os.name == "nt" and bool(ctypes.windll.user32.LockWorkStation())
+
+
+class RemoteLockRepository:
+    """Persist a parent's LOCK_NOW so it survives unlock attempts and Agent restarts."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.path, timeout=10) as db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS remote_lock (
+                    id INTEGER PRIMARY KEY CHECK (id = 1), active INTEGER NOT NULL, updated_at TEXT NOT NULL
+                )
+            """)
+
+    def active(self) -> bool:
+        with sqlite3.connect(self.path, timeout=10) as db:
+            row = db.execute("SELECT active FROM remote_lock WHERE id=1").fetchone()
+        return bool(row and row[0])
+
+    def set(self, active: bool) -> None:
+        with sqlite3.connect(self.path, timeout=10) as db:
+            db.execute(
+                "INSERT INTO remote_lock(id, active, updated_at) VALUES (1, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET active=excluded.active, updated_at=excluded.updated_at",
+                (int(active), datetime.now().astimezone().isoformat()),
+            )
 
 
 class WorkstationEnforcer:

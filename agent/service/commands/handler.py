@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from service.enforcement import EnforcementReason, WorkstationEnforcer
+from service.enforcement import EnforcementReason, RemoteLockRepository, WorkstationEnforcer
 from service.screen_time.counter import UsageRepository
 
 
@@ -55,12 +55,14 @@ class CommandHandler:
         enforcer: WorkstationEnforcer,
         today: Callable = lambda: datetime.now().astimezone().date(),
         on_event: Callable[[dict], None] | None = None,
+        remote_lock: RemoteLockRepository | None = None,
     ):
         self.repository = repository
         self.usage = usage
         self.enforcer = enforcer
         self.today = today
         self.on_event = on_event or (lambda _event: None)
+        self.remote_lock = remote_lock
 
     def handle(self, command: dict[str, Any]) -> CommandResult:
         command_id = command.get("command_id")
@@ -79,10 +81,16 @@ class CommandHandler:
             if not isinstance(payload, dict):
                 raise ValueError("payload must be an object")
             if command_type == "LOCK_NOW":
+                # Persist first: the counter keeps re-locking until the parent sends UNLOCK.
+                if self.remote_lock is not None:
+                    self.remote_lock.set(True)
                 if not self.enforcer.enforce(EnforcementReason.REMOTE_LOCK, force=True):
                     raise RuntimeError("LockWorkStation failed")
             elif command_type == "UNLOCK":
+                if self.remote_lock is not None:
+                    self.remote_lock.set(False)
                 self.enforcer.allow_unlock()
+                event = {"type": "REMOTE_UNLOCKED"}
             elif command_type == "REQUEST_REJECTED":
                 event = {"type": "REQUEST_REJECTED", "response": payload.get("response")}
             else:

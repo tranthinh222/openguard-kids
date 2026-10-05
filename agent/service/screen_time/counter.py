@@ -121,6 +121,7 @@ class ScreenTimeCounter:
         max_tick_seconds: float = float("inf"),
         enforcer: WorkstationEnforcer | None = None,
         on_event: Callable[[dict], None] | None = None,
+        remote_locked: Callable[[], bool] = lambda: False,
     ):
         self.repository = repository
         self.policy_provider = policy_provider
@@ -132,6 +133,7 @@ class ScreenTimeCounter:
         self.max_tick_seconds = max_tick_seconds
         self.enforcer = enforcer
         self.on_event = on_event or (lambda _event: None)
+        self.remote_locked = remote_locked
         self._previous = self.monotonic()
         self._lock_pending = False
         self._grace_deadline: float | None = None
@@ -140,6 +142,15 @@ class ScreenTimeCounter:
         current_mono = self.monotonic()
         delta = max(0.0, current_mono - self._previous)
         self._previous = current_mono
+        if self.remote_locked():
+            # A parent's LOCK_NOW holds regardless of policy, quota or schedule.
+            if not self.unlocked_probe():
+                self._lock_pending = False
+                if self.enforcer:
+                    self.enforcer.session_is_locked()
+                return TickResult(0, 0, 0, False, "session_locked")
+            self._enforce(EnforcementReason.REMOTE_LOCK)
+            return TickResult(0, 0, 0, True, "remote_lock")
         moment = self.now()
         policy = self.policy_provider()
         if policy is None:

@@ -743,6 +743,8 @@ class AgentWindow:
                     elif kind == "TIME_ADDED":
                         prefix = "Phụ huynh đã duyệt yêu cầu." if payload.get("requested") else "Phụ huynh vừa cộng giờ."
                         self._show_banner(f"{prefix} Em có thêm {payload['minutes']} phút.")
+                    elif kind == "REMOTE_UNLOCKED":
+                        self._show_banner("Phụ huynh đã cho phép sử dụng lại máy.")
                     elif kind == "REQUEST_REJECTED":
                         reason = payload.get("response")
                         self._show_banner(

@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 from service.policy import PolicyManager, PolicyRejectedError, PolicyRepository
 from service.clock import ClockMonitor
 from service.commands import CommandHandler, ProcessedCommandRepository
-from service.enforcement import WorkstationEnforcer
+from service.enforcement import RemoteLockRepository, WorkstationEnforcer
 from service.realtime import WebSocketWorker
 from service.requests import ExtraTimeClient
 from service.screen_time import (
@@ -172,10 +172,12 @@ class AgentClient:
         self.usage_repository = UsageRepository(database_path)
         self.clock_monitor = ClockMonitor(database_path)
         self.enforcer = WorkstationEnforcer()
+        self.remote_lock = RemoteLockRepository(database_path)
         self.command_handler = CommandHandler(
             ProcessedCommandRepository(database_path), self.usage_repository,
             self.enforcer, today=lambda: self.clock_monitor.trusted_now().date(),
             on_event=on_command_event or (lambda event: LOGGER.info("Command event: %s", event)),
+            remote_lock=self.remote_lock,
         )
         self.extra_time = ExtraTimeClient(self._authorized_post)
 
@@ -254,6 +256,7 @@ class AgentClient:
             locker=lambda: False,
             enforcer=self.enforcer,
             now=self.clock_monitor.trusted_now,
+            remote_locked=self.remote_lock.active,
             on_event=on_event or (lambda event: LOGGER.info("Screen-time event: %s", event)),
         )
 
