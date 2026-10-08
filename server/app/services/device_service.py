@@ -1,4 +1,4 @@
-from datetime import timezone, datetime
+from datetime import timezone, datetime, date
 from typing import Any
 from sqlalchemy.orm import Session
 
@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.models.device import Device
 from app.services.command_service import as_agent_command, mark_sent, pending_commands
 from app.services.policy_service import get_latest_policy
+from app.services.activity_service import record_screen_usage
 
 ONLINE_TIMEOUT_SECONDS = 120
 
@@ -23,7 +24,8 @@ def process_heartbeat(
     device: Device, 
     agent_policy_version: int,
     quota_used_sec: int = 0,
-    agent_wall_clock: datetime | None=None
+    agent_wall_clock: datetime | None=None,
+    quota_date: date | None = None,
 ) -> dict[str, Any]:
     latest_policy = get_latest_policy(db, device.child_id)
     now = utc_now()
@@ -41,6 +43,7 @@ def process_heartbeat(
 
         drift = (wall.astimezone(timezone.utc) - server_now).total_seconds()
     device.clock_drift_sec = drift
+    record_screen_usage(db, device, now, quota_date)
 
     commands = pending_commands(db, device.id)
     for command in commands:
