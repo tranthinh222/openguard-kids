@@ -17,8 +17,8 @@ test("Week 02 gives Policies and Requests first-class navigation routes", () => 
   assert.match(base, />Yêu cầu<\/a/);
   assert.doesNotMatch(base, /\/children\?view=policies/);
   assert.doesNotMatch(base, /\/children\?view=requests/);
-  assert.match(base, /Sẽ triển khai ở Week 03/);
-  assert.match(base, /app\.js\?v=w02-ia-fix1/);
+  assert.match(base, /href="\/reports"/);
+  assert.match(base, /app\.js\?v=w03/);
 });
 
 test("Children detail keeps child/device/enrollment role and links to workspaces", () => {

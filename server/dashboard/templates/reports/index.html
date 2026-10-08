@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Báo cáo · OpenGuard Kids{% endblock %}
+{% block content %}
+<h1 class="h3">Báo cáo hoạt động</h1>
+<p class="text-secondary">Cùng con xem lại thời gian sử dụng và những nội dung bị chặn.</p>
+<div class="card border-0 shadow-sm mb-4"><div class="card-body d-flex flex-wrap align-items-end gap-3">
+  <div><label for="report-child" class="form-label">Trẻ</label><select id="report-child" class="form-select"></select></div>
+  <div><label for="report-range" class="form-label">Khoảng thời gian</label><select id="report-range" class="form-select"><option value="1">Hôm nay</option><option value="7" selected>7 ngày</option><option value="30">30 ngày</option><option value="custom">Tùy chọn</option></select></div>
+  <div><label for="report-start" class="form-label">Từ ngày</label><input id="report-start" class="form-control" type="date"></div>
+  <div><label for="report-end" class="form-label">Đến ngày</label><input id="report-end" class="form-control" type="date"></div>
+  <button id="report-load" class="btn btn-primary" type="button">Xem báo cáo</button>
+  <button id="report-export" class="btn btn-outline-primary" type="button" disabled>Xuất CSV</button>
+</div></div>
+<p id="report-status" role="status" aria-live="polite">Đang tải...</p>
+<div id="report-results" hidden>
+  <div class="row g-3 mb-4">
+    <div class="col-md-6"><div class="card card-body"><span>Thời gian sử dụng</span><strong id="screen-total" class="fs-3"></strong><small class="text-secondary">Từ lần đồng bộ gần nhất của các thiết bị; các thiết bị dùng đồng thời được cộng riêng.</small></div></div>
+    <div class="col-md-6"><div class="card card-body"><span>Số lần bị chặn</span><strong id="block-total" class="fs-3"></strong><small id="report-clock-note" class="text-secondary"></small></div></div>
+  </div>
+  <section class="card card-body mb-4"><h2 class="h5">Thời gian theo ngày</h2><div id="daily-chart" role="img" aria-label="Biểu đồ thời gian theo ngày"></div></section>
+  <div class="row g-3">
+    <section class="col-lg-4"><div class="card card-body h-100"><h2 class="h5">Top 10 ứng dụng</h2><p class="small text-secondary">Thời lượng chạy app có thể chồng lấp, không tương đương screen time.</p><div id="top-apps"></div></div></section>
+    <section class="col-lg-4"><div class="card card-body h-100"><h2 class="h5">Top 10 tên miền</h2><p class="small text-secondary">Số truy vấn DNS, không phải số lượt mở trang.</p><div id="top-domains"></div></div></section>
+    <section class="col-lg-4"><div class="card card-body h-100"><h2 class="h5">Nội dung bị chặn</h2><div id="top-blocks"></div></div></section>
+  </div>
+</div>
+{% endblock %}

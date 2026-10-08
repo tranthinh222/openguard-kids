@@ -1,6 +1,7 @@
 import { apiRequest, apiWrite } from "./api.js";
 import { setButtonBusy, showToast } from "./common.js";
 import { startLiveRefresh } from "./live-refresh.js";
+import { fillContentRules, initContentRules, readContentRules } from "./content-rules.js?v=w03";
 
 const DAYS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
 let policyState = null;
@@ -200,6 +201,7 @@ function fillPolicy(policy) {
     screenTime.grace_period_sec ?? 60;
   document.getElementById("policy-version").textContent = `v${policy.version}`;
   renderSchedule(policyState.payload.weekly_schedule);
+  fillContentRules(policyState.payload);
 }
 
 function readNumber(id, min, max, label) {
@@ -240,12 +242,7 @@ function policyFromForm() {
           : [10, 5, 1],
       },
       weekly_schedule: policyState.payload.weekly_schedule,
-      apps: Array.isArray(policyState.payload.apps)
-        ? policyState.payload.apps
-        : [],
-      domains: Array.isArray(policyState.payload.domains)
-        ? policyState.payload.domains
-        : [],
+      ...readContentRules(),
     },
   };
 }
@@ -267,6 +264,7 @@ export async function initPolicyDetailPage() {
   document.getElementById("policy-child-name").textContent = child.display_name;
   document.title = `${child.display_name} · Chính sách · OpenGuard Kids`;
   fillPolicy(policy);
+  initContentRules();
 
   const save = document.getElementById("save-policy-button");
   save.addEventListener("click", async () => {

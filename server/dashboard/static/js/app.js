@@ -5,7 +5,8 @@ import { initDashboardPage } from "./dashboard.js";
 import { initChildrenPage } from "./children.js";
 import { initChildCreatePage } from "./child-create.js";
 import { initChildDetailPage } from "./child-detail.js";
-import { initPoliciesPage, initPolicyDetailPage } from "./policies.js";
+import { initPoliciesPage, initPolicyDetailPage } from "./policies.js?v=w03";
+import { initReportsPage } from "./reports.js?v=w03";
 import { initRequestsPage } from "./requests.js";
 
 async function main() {
@@ -25,6 +26,9 @@ async function main() {
   if (!session) return;
 
   switch (page) {
+    case "reports":
+      await initReportsPage();
+      break;
     case "dashboard":
       await initDashboardPage();
       break;

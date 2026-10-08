@@ -32,7 +32,7 @@ endblock %} {% block content %}
           <div>
             <h2 class="h5 mb-1">Giới hạn thời gian</h2>
             <p class="small text-secondary mb-0">
-              Chính sách mới được Agent đồng bộ trong tối đa 60 giây.
+              Chính sách được gửi ngay qua kết nối trực tuyến; đồng bộ định kỳ mỗi 60 giây là dự phòng.
             </p>
           </div>
           <i
@@ -159,18 +159,25 @@ endblock %} {% block content %}
   </div>
 </div>
 
-<div class="card border-0 shadow-sm mt-4">
-  <div
-    class="card-body p-4 d-flex flex-wrap justify-content-between align-items-center gap-3"
-  >
-    <div>
-      <h2 class="h6 mb-1">Mở rộng ở Week 03</h2>
-      <p class="small text-secondary mb-0">
-        App Rules, Domain Rules và SafeSearch sẽ được bổ sung vào module Chính
-        sách này.
-      </p>
-    </div>
-    <span class="badge text-bg-light border">Coming Week 03</span>
+<section class="card border-0 shadow-sm mt-4">
+  <div class="card-body p-4">
+    <h2 class="h5">Quy tắc ứng dụng</h2>
+    <p class="small text-secondary">Chọn cho phép hoặc chặn. Mã SHA-256 giúp nhận diện ứng dụng khi đổi tên. Chọn Mặc định hoặc xóa dòng để bỏ luật.</p>
+    <div id="app-rules"></div>
+    <button id="add-app-rule" class="btn btn-outline-primary" type="button">Thêm ứng dụng</button>
   </div>
-</div>
+</section>
+<section class="card border-0 shadow-sm mt-4">
+  <div class="card-body p-4">
+    <h2 class="h5">Quy tắc website</h2>
+    <p class="small text-secondary">Mỗi dòng một tên miền, không nhập URL. Luật áp dụng cả tên miền con. Cho phép cụ thể được ưu tiên trước chặn và nhóm nội dung.</p>
+    <div class="row g-3 mb-3">
+      <div class="col-md-6"><label class="form-label" for="domain-allow">Cho phép</label><textarea id="domain-allow" class="form-control" rows="5" placeholder="school.edu.vn"></textarea></div>
+      <div class="col-md-6"><label class="form-label" for="domain-block">Chặn</label><textarea id="domain-block" class="form-control" rows="5" placeholder="example.com"></textarea></div>
+    </div>
+    <fieldset><legend class="h6">Nhóm nội dung bị chặn</legend><div id="domain-categories"></div></fieldset>
+    <label class="form-check form-switch mt-3"><input id="safe-search" class="form-check-input" type="checkbox"><span class="form-check-label">Bật SafeSearch cho công cụ tìm kiếm được hỗ trợ</span></label>
+    <button id="save-content-policy" class="btn btn-primary mt-3" type="button">Lưu toàn bộ chính sách</button>
+  </div>
+</section>
 {% endblock %}
