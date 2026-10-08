@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     device_refresh_token_expire_days: int = 30
     enrollment_code_expire_minutes: int = 10
     agent_clock_drift_threshold_sec: float = Field(default=120, gt=0, allow_inf_nan=False)
+    report_timezone_offset_minutes: int = Field(default=420, ge=-720, le=840)
 
     web_session_expire_hours: int = 12
     web_cookie_secure: bool = False
