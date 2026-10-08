@@ -7,10 +7,7 @@ from app.models.child import Child
 from app.models.device import Device
 from app.models.user import User
 from app.schemas.command import CommandAckRequest, CommandCreateRequest, ParentCommandResponse
-from app.services.command_service import ack_command, create_command
-from app.services.realtime import manager
-
-from app.core.security import utc_now
+from app.services.command_service import ack_command, create_command, push_command
 
 router = APIRouter()
 
@@ -43,17 +40,7 @@ async def parent_create_command(
         raise HTTPException(status_code=422, detail="minutes is required for ADD_TIME")
 
     command = create_command(db, device.id, payload.type, body)
-    delivered = await manager.send(device.id, {
-        "command_id": command.id,
-        "type": command.type,
-        "payload": command.payload,
-    })
-
-    if delivered:
-        command.status = "sent"
-        command.sent_at = utc_now()
-        db.commit()
-        db.refresh(command)
+    await push_command(db, command)
 
     return command
 

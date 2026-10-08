@@ -10,7 +10,7 @@ from app.schemas.device import ParentDeviceResponse
 from app.schemas.policy import PolicyResponse, PolicyUpdateRequest
 from app.services.child_service import create_child, get_owned_child, list_children
 from app.services.device_service import device_is_online
-from app.services.policy_service import get_latest_policy, update_policy
+from app.services.policy_service import get_latest_policy, update_policy, push_policy_update
 
 router = APIRouter()
 
@@ -99,7 +99,7 @@ def get_child_policy(
     return get_latest_policy(db, child.id)
 
 @router.put("/{child_id}/policy", response_model=PolicyResponse)
-def update_child_policy(
+async def update_child_policy(
     child_id: str,
     payload: PolicyUpdateRequest,
     parent: User = Depends(get_current_parent_for_write),
@@ -107,4 +107,6 @@ def update_child_policy(
 ):
     child = get_owned_child(db, parent.id, child_id)
 
-    return update_policy(db, child.id, payload.payload)
+    policy = update_policy(db, child.id, payload.payload, actor_id=parent.id)
+    await push_policy_update(db, policy)
+    return policy

@@ -1,4 +1,5 @@
 import json
+from pydantic import ValidationError
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from jwt import InvalidTokenError
@@ -11,6 +12,7 @@ from app.models.device import Device
 from app.schemas.device import DeviceAccessTokenResponse, DeviceRefreshRequest
 from app.schemas.heartbeat import HeartbeatRequest, HeartbeatResponse
 from app.schemas.policy import PolicyResponse
+from app.schemas.command import WebSocketCommandAck
 from app.services.command_service import ack_command, as_agent_command, mark_sent, pending_commands
 from app.services.device_service import process_heartbeat
 from app.services.enrollment_service import refresh_device_access_token
@@ -51,6 +53,7 @@ def heartbeat(
         agent_policy_version=payload.policy_version,
         quota_used_sec=payload.quota_used_sec,
         agent_wall_clock=payload.agent_wall_clock,
+        quota_date=payload.quota_date,
     )
 
 @router.get("/policy", response_model=PolicyResponse)
@@ -104,10 +107,14 @@ async def device_websocket(websocket: WebSocket):
 
         while True:
             message = await websocket.receive_json()
-            if message.get("type") == "ack":
+            if isinstance(message, dict) and message.get("type") == "ack":
+                try:
+                    ack = WebSocketCommandAck.model_validate(message)
+                except ValidationError:
+                    await websocket.close(code=1008, reason="Invalid command ACK")
+                    break
                 ack_command(
-                    db, device.id, str(message.get("command_id", "")),
-                    str(message.get("status", "completed")), message.get("error"),
+                    db, device.id, ack.command_id, ack.status, ack.error,
                 )
     except WebSocketDisconnect:
         pass
