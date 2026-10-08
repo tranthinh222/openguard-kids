@@ -7,6 +7,7 @@ from app.models.policy import Policy
 from app.models.web_session import WebSession
 from app.models.request import ChildRequest
 from app.models.command import DeviceCommand
+from app.models.activity import ActivityEvent, ScreenUsage, PolicyAudit
 
 __all__ = [
     "User",
@@ -18,4 +19,7 @@ __all__ = [
     "WebSession",
     "ChildRequest",
     "DeviceCommand",
+    "ActivityEvent",
+    "ScreenUsage",
+    "PolicyAudit",
 ]
