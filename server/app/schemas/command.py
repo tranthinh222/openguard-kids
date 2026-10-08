@@ -20,6 +20,10 @@ class CommandAckRequest(BaseModel):
     status: Literal["completed", "failed"]
     error: str | None = Field(default=None, max_length=255)
 
+class WebSocketCommandAck(CommandAckRequest):
+    type: Literal["ack"]
+    command_id: str = Field(min_length=1, max_length=36)
+
 class ParentCommandResponse(BaseModel):
     id: str
     device_id: str
