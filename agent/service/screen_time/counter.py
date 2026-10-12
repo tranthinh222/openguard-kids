@@ -143,14 +143,30 @@ class ScreenTimeCounter:
         self._clock_sync_deadline = self._previous + max(0.0, clock_sync_timeout_sec)
         self._lock_pending = False
         self._grace_deadline: float | None = None
+        self._relock_seconds = 0
 
     def tick(self) -> TickResult:
+        result = self._tick()
+        remaining = (self.enforcer.relock_remaining_seconds
+                     if self.enforcer and result.should_lock else 0)
+        if remaining and remaining != self._relock_seconds:
+            self.on_event({'type': 'RELOCK_COUNTDOWN', 'seconds_remaining': remaining,
+                           'started': self._relock_seconds == 0, 'reason': result.reason})
+        elif not remaining and self._relock_seconds:
+            self.on_event({'type': 'RELOCK_COUNTDOWN_ENDED', 'restriction_active': result.should_lock})
+        self._relock_seconds = remaining
+        return result
+
+    def _tick(self) -> TickResult:
         current_mono = self.monotonic()
         delta = max(0.0, current_mono - self._previous)
         self._previous = current_mono
+        unlocked = self.unlocked_probe()
+        if self.enforcer:
+            self.enforcer.observe_session(unlocked)
         if self.remote_locked():
             # A parent's LOCK_NOW holds regardless of policy, quota or schedule.
-            if not self.unlocked_probe():
+            if not unlocked:
                 self._lock_pending = False
                 if self.enforcer:
                     self.enforcer.session_is_locked()
@@ -163,7 +179,6 @@ class ScreenTimeCounter:
         if not self.clock_ready():
             if current_mono < self._clock_sync_deadline:
                 return TickResult(0, 0, 0, False, "clock_sync_pending")
-            unlocked = self.unlocked_probe()
             if unlocked:
                 self._enforce(EnforcementReason.CLOCK_UNVERIFIED)
             elif self.enforcer:
@@ -174,7 +189,7 @@ class ScreenTimeCounter:
         quota = policy.quota_seconds_at(moment) + usage.bonus_seconds
         available = max(0.0, quota - usage.used_seconds)
 
-        if not self.unlocked_probe():
+        if not unlocked:
             self._lock_pending = False
             if self.enforcer:
                 self.enforcer.session_is_locked()

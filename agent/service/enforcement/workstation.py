@@ -7,6 +7,9 @@ import logging
 import os
 import sqlite3
 import time
+import threading
+import math
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -53,30 +56,85 @@ class RemoteLockRepository:
             )
 
 
+@dataclass
+class _LockState:
+    pending: bool = False
+    session_locked: bool = False
+    retry_after: float = 0.0
+    last_reason: EnforcementReason | None = None
+    last_requested_at: float | None = None
+    mutex: object = field(default_factory=threading.RLock)
+
+
 class WorkstationEnforcer:
-    def __init__(self, lock: Callable[[], bool] = _windows_lock, monotonic: Callable[[], float] = time.monotonic):
+    _states = {}
+    _states_mutex = threading.Lock()
+
+    def __init__(self, lock: Callable[[], bool] = _windows_lock, monotonic: Callable[[], float] = time.monotonic,
+                 on_locked: Callable[[], None] | None = None, relock_delay_sec: float = 5.0,
+                 state_key: Path | None = None):
+        if not math.isfinite(relock_delay_sec) or relock_delay_sec < 0:
+            raise ValueError('Relock delay must be finite and non-negative')
         self._lock = lock
         self._monotonic = monotonic
-        self._pending = False
-        self.last_reason: EnforcementReason | None = None
-        self.last_requested_at: float | None = None
+        self.relock_delay_sec = relock_delay_sec
+        with self._states_mutex:
+            self._state = (self._states.setdefault(str(state_key.resolve()).casefold(), _LockState())
+                           if state_key is not None else _LockState())
+        self.on_locked = on_locked
+
+    @property
+    def last_reason(self):
+        return self._state.last_reason
+
+    @property
+    def last_requested_at(self):
+        return self._state.last_requested_at
+
+    @property
+    def relock_remaining_seconds(self) -> int:
+        with self._state.mutex:
+            if self._state.pending or self._state.session_locked:
+                return 0
+            return max(0, math.ceil(self._state.retry_after - self._monotonic()))
 
     def enforce(self, reason: EnforcementReason, force: bool = False) -> bool:
-        if self._pending and not force:
-            return True
-        requested_at = self._monotonic()
-        success = self._lock()
-        self.last_reason = reason
-        self.last_requested_at = requested_at
-        self._pending = success
-        if not success:
-            LOGGER.error("Failed to lock workstation; reason=%s", reason.value)
-        return success
+        with self._state.mutex:
+            state = self._state
+            if state.pending and not force:
+                return True
+            requested_at = self._monotonic()
+            # Accepted but deferred; the counter retries while the restriction remains.
+            # force (remote commands) must not bypass the relock interval.
+            if state.session_locked or requested_at < state.retry_after:
+                return True
+            success = self._lock()
+            state.last_reason = reason
+            state.last_requested_at = requested_at
+            state.retry_after = requested_at + self.relock_delay_sec
+            state.pending = success
+            if not success:
+                LOGGER.error("Failed to lock workstation; reason=%s", reason.value)
+            elif self.on_locked:
+                self.on_locked()
+            return success
+
+    def observe_session(self, unlocked: bool) -> None:
+        with self._state.mutex:
+            state = self._state
+            if not unlocked:
+                state.session_locked = True
+                state.pending = False
+            elif state.session_locked:
+                state.session_locked = False
+                if state.last_requested_at is not None:
+                    state.retry_after = self._monotonic() + self.relock_delay_sec
 
     def session_is_locked(self) -> None:
-        self._pending = False
+        self.observe_session(False)
 
     def allow_unlock(self) -> None:
         # Windows requires the user to authenticate; this clears only Agent state.
-        self._pending = False
-        self.last_reason = None
+        with self._state.mutex:
+            self._state.pending = False
+            self._state.last_reason = None

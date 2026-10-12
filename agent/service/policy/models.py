@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from service.content_rules import validate_content
 
 
 class PolicyValidationError(ValueError):
@@ -73,9 +74,10 @@ class Policy:
         schedule = payload.get("weekly_schedule", [True] * 336)
         if not isinstance(schedule, list) or len(schedule) != 336 or any(type(item) is not bool for item in schedule):
             raise PolicyValidationError("weekly_schedule must contain exactly 336 booleans")
-        for name in ("apps", "domains"):
-            if not isinstance(payload.get(name, []), list):
-                raise PolicyValidationError(f"payload.{name} must be a list")
+        try:
+            validate_content(payload)
+        except (ValueError, TypeError) as exc:
+            raise PolicyValidationError(str(exc)) from exc
         return cls(
             policy_id=policy_id,
             version=version,

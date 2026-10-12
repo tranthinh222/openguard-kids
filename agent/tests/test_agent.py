@@ -1,4 +1,6 @@
 import json
+import os
+import pytest
 from pathlib import Path
 
 import httpx
@@ -74,6 +76,7 @@ def test_heartbeat_refreshes_expired_token(tmp_path):
     assert store.load().last_heartbeat_at is not None
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX mode bits do not verify Windows ACLs')
 def test_state_file_is_private(tmp_path):
     store = StateStore(tmp_path / "state.json")
     store.save(AgentState(device_id="device-1"))

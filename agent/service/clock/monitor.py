@@ -32,6 +32,7 @@ class ClockMonitor:
         threshold_seconds: float = 120,
         monotonic: Callable[[], float] = time.monotonic,
         local_now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        report_timezone=None,
         # local_now: Callable[[], datetime] = agent_wall_now,
     ):
         self.path = path
@@ -42,7 +43,7 @@ class ClockMonitor:
         self._mono_anchor: float | None = None
         self._mutex = threading.RLock()
         self.status: ClockStatus | None = None
-        self._timezone = local_now().astimezone().tzinfo
+        self._timezone = report_timezone or local_now().astimezone().tzinfo
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as db:
             db.execute("""

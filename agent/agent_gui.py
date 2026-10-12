@@ -219,6 +219,9 @@ class AgentWindow:
         self._banner_job: str | None = None
         self._init_fonts()
         self._build()
+        from tray_ui import TrayUI
+        self.tray = TrayUI(self.events)
+        self.tray.start()
         self._show_initial_view()
         root.after(100, self._process_events)
         root.after(1000, self._refresh_remaining)
@@ -418,6 +421,8 @@ class AgentWindow:
         self.check_button = FlatButton(body, "Kiểm tra kết nối", self._check_connection, self.f_button)
         self.check_button.pack(fill="x", pady=(px(16), px(0)))
         self.extra_time_button = FlatButton(body, "Xin thêm 15 phút", self._request_extra_time, self.f_button, variant="secondary")
+        FlatButton(body, 'Hôm nay / quyền riêng tư', self._show_transparency, self.f_button,
+                   variant='secondary').pack(fill='x', pady=6)
         self.extra_time_button.pack(fill="x", pady=(px(8), px(0)))
 
         self.policy_section = Collapsible(view, "Chính sách hiện tại", self.f_body, self._fit_window)
@@ -652,6 +657,11 @@ class AgentWindow:
 
         def task() -> None:
             try:
+                for worker in (self.worker, self.protection):
+                    if worker._thread:
+                        worker._thread.join(timeout=self.controller.config.request_timeout_sec * 4 + 15)
+                        if worker._thread.is_alive():
+                            raise RuntimeError('Agent is still stopping; wait before pairing again')
                 self.events.put(("enrolled", self.controller.enroll(code, server_url)))
             except Exception as exc:
                 self.events.put(("enroll_error", exc))
@@ -665,6 +675,9 @@ class AgentWindow:
         self._show_pair_view(allow_back=True)
 
     def _back_to_status(self) -> None:
+        if self.protection.running and self.protection._stop.is_set():
+            self.root.after(100, self._back_to_status)
+            return
         self._show_status_view()
         self.worker.start()
         self.protection.start()
@@ -675,7 +688,6 @@ class AgentWindow:
     def _toggle_service(self) -> None:
         if self.worker.running:
             self.worker.stop()
-            self.protection.stop()
         else:
             self.connection = "checking"
             self.worker.start()
@@ -729,7 +741,26 @@ class AgentWindow:
         try:
             while True:
                 event, payload = self.events.get_nowait()
-                if event == "enrolled":
+                if event == 'tray_open':
+                    self.root.deiconify()
+                    self.root.lift()
+                elif event == 'tray_today':
+                    self.root.deiconify()
+                    self._show_transparency()
+                elif event == 'tray_exit':
+                    self._quit()
+                    return
+                elif event == 'transparency':
+                    from transparency_ui import show
+                    usage = None
+                    if self.controller.clock_monitor.ready:
+                        from service.screen_time import UsageRepository
+                        path = self.controller.config.database_path or self.controller.config.state_path.with_name('agent.db')
+                        usage = UsageRepository(path).get(self.controller.clock_monitor.trusted_now().date())
+                    show(self.root, payload, self.controller.current_policy(), usage)
+                elif event == 'transparency_error':
+                    self._show_banner(describe_error(payload), 'error')
+                elif event == "enrolled":
                     self._set_enrolling(False)
                     self.stepper.set_step(3)
                     self.code_var.set("")
@@ -769,7 +800,33 @@ class AgentWindow:
                         self._show_banner(describe_error(error), "error")
                 elif event == "protection":
                     kind = payload.get("type")
-                    if kind == "TIME_WARNING":
+                    if kind == 'RELOCK_COUNTDOWN':
+                        message = f"Em còn {payload['seconds_remaining']} giây trước khi máy bị khóa lại vì điều kiện khóa vẫn còn."
+                        self._show_banner(message, 'warning')
+                        if payload.get('started'):
+                            self.tray.notify(message)
+                    elif kind == 'RELOCK_COUNTDOWN_ENDED':
+                        self.tray.clear_notification()
+                        if payload.get('restriction_active'):
+                            self._show_banner('Đã hết thời gian chờ trước lần khóa tiếp theo.', 'warning')
+                        else:
+                            self._show_banner('Đã dừng đếm ngược khóa lại.')
+                    elif kind in {'APP_BLOCKED', 'DOMAIN_BLOCKED'}:
+                        reasons = {'sha256': 'nhận dạng SHA-256', 'process_name': 'tên ứng dụng',
+                                   'explicit_block': 'danh sách chặn', 'games': 'nhóm trò chơi',
+                                   'social': 'nhóm mạng xã hội', 'age_inappropriate': 'nội dung không phù hợp tuổi',
+                                   'unknown': 'nhóm chưa phân loại', 'education': 'nhóm học tập', 'entertainment': 'nhóm giải trí'}
+                        message = f"Đã chặn {payload['subject']} theo policy: {reasons.get(payload['reason'], payload['reason'])}."
+                        self._show_banner(message, 'warning')
+                        self.tray.notify(message)
+                    elif kind == 'CONTENT_ERROR':
+                        self._show_banner(payload['message'], 'error')
+                        self.tray.notify(payload['message'])
+                    elif kind == 'POLICY_UPDATED':
+                        self.policy_version = payload['version']
+                        self._refresh_status()
+                        self._show_banner(f"Đã áp dụng policy v{payload['version']}.")
+                    elif kind == "TIME_WARNING":
                         self._show_banner(f"Còn {payload['minutes_remaining']} phút sử dụng.", "warning")
                     elif kind == "GRACE_STARTED":
                         self._show_banner(
@@ -794,9 +851,33 @@ class AgentWindow:
         self.root.after(100, self._process_events)
 
     def _close(self) -> None:
+        if self.tray.visible:
+            self.root.withdraw()
+            return
+        self._quit()
+
+    def _show_transparency(self):
+        def task():
+            try:
+                self.events.put(('transparency', self.controller.transparency()))
+            except Exception as exc:
+                self.events.put(('transparency_error', exc))
+        threading.Thread(target=task, daemon=True).start()
+
+    def _quit(self):
         self.worker.stop()
         self.protection.stop()
-        self.root.destroy()
+        self.tray.stop()
+        self.root.deiconify()
+        self.root.title('OpenGuard — đang dừng và lưu dữ liệu…')
+        self._finish_quit()
+
+    def _finish_quit(self):
+        # Keep Tk responsive while final app segments are persisted and sockets close.
+        if any(worker._thread and worker._thread.is_alive() for worker in (self.worker, self.protection)):
+            self.root.after(100, self._finish_quit)
+        else:
+            self.root.destroy()
 
 
 def main() -> None:

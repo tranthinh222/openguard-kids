@@ -60,6 +60,11 @@ class PolicyRepository:
         now = datetime.now(timezone.utc).isoformat()
         encoded = json.dumps(policy.payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         with self._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            existing = db.execute('SELECT version,signature FROM policies WHERE is_active=1 ORDER BY version DESC LIMIT 1').fetchone()
+            if existing and (existing['version'] > policy.version or
+                             (existing['version'] == policy.version and existing['signature'] != policy.signature)):
+                raise PolicyRejectedError('Concurrent policy downgrade or collision rejected')
             db.execute("UPDATE policies SET is_active=0")
             db.execute(
                 "INSERT OR REPLACE INTO policies(version, policy_id, payload_json, signature, activated_at, is_active) VALUES (?, ?, ?, ?, ?, 1)",

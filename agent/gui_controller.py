@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -16,6 +16,8 @@ from service.policy import PolicyRepository
 from service.policy.models import Policy
 from service.screen_time.counter import TickResult
 from service.clock import ClockMonitor
+from service.content_runtime import ContentRuntime
+from service.runtime_lock import RuntimeLock
 
 NETWORK_ERROR = "Không kết nối được server. Kiểm tra Internet và thử lại."
 
@@ -152,7 +154,8 @@ class AgentController:
     def __init__(self, config: AgentConfig | None = None):
         self.config = config or AgentConfig.from_env()
         self.store = StateStore(self.config.state_path)
-        self.clock_monitor = ClockMonitor(self.config.database_path or self.config.state_path.with_name("agent.db"))
+        self.clock_monitor = ClockMonitor(self.config.database_path or self.config.state_path.with_name("agent.db"),
+                                          report_timezone=timezone(timedelta(minutes=self.config.report_timezone_offset_minutes)))
         # Commands arrive over WebSocket or heartbeat; both report through this callback.
         self.on_command_event: Callable[[dict], None] | None = None
 
@@ -187,9 +190,23 @@ class AgentController:
             return None
 
     def request_extra_time(self, minutes: int = 15) -> dict:
-        client = AgentClient(self.config, self.store)
+        client = AgentClient(self.config, self.store, clock_monitor=self.clock_monitor)
         try:
             return client.request_extra_time(minutes)
+        finally:
+            client.close()
+
+    def transparency(self):
+        client = AgentClient(self.config, self.store, clock_monitor=self.clock_monitor)
+        try:
+            day = self.clock_monitor.trusted_now().date().isoformat() if self.clock_monitor.ready else datetime.now().date().isoformat()
+            try:
+                payload = client.authorized_get(f'/api/v1/agent/transparency?start={day}&end={day}')
+                client.events.cache('transparency', {'date': day, 'data': payload})
+                return dict(source='server', data=payload, local=client.events.recent())
+            except (httpx.HTTPError, AgentNotEnrolledError):
+                cached = client.events.cached('transparency')
+                return dict(source='offline', data=cached, local=client.events.recent())
         finally:
             client.close()
 
@@ -257,8 +274,12 @@ class ProtectionWorker:
         client = AgentClient(self.controller.config, self.controller.store, on_command_event=self.on_event,
                              clock_monitor=self.controller.clock_monitor)
         websocket = None
+        lease = None
+        content = ContentRuntime(client, self.on_event)
         try:
+            lease = RuntimeLock(client.events.path)
             counter = client.screen_time_counter(self.on_event)
+            content.start()
             websocket = client.websocket_worker()
             while not stop.is_set():
                 if self.controller.clock_monitor.ready:
@@ -274,4 +295,7 @@ class ProtectionWorker:
         finally:
             if websocket is not None:
                 websocket.stop()
+            content.stop()
             client.close()
+            if lease:
+                lease.close()

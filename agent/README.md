@@ -1,5 +1,20 @@
 # OpenGuard Kids Agent
 
+## Week 03
+
+Hướng dẫn cấu hình, test app/DNS/offline và các giới hạn triển khai: [WEEK03.md](WEEK03.md).
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r agent/requirements.txt
+.\.venv\Scripts\python.exe agent/agent_gui.py
+```
+
+Agent nhận policy ngay qua WebSocket (xác minh HMAC), heartbeat là fallback.
+GUI có biểu tượng system tray; đóng cửa sổ sẽ thu xuống tray, chọn **Thoát agent**
+để dừng. **Hôm nay / quyền riêng tư** hiển thị báo cáo, policy đang áp dụng,
+lịch sử thay đổi và event chưa đồng bộ. Nút tạm dừng đồng bộ chỉ dừng heartbeat,
+không dừng bảo vệ app/DNS, WebSocket hay upload event.
+
 ## Chạy giao diện
 
 Từ thư mục gốc của dự án, dùng Python trong virtual environment:

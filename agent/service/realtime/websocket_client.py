@@ -32,6 +32,7 @@ class WebSocketWorker:
         verify_tls: bool = True,
         connector=connect,
         on_auth_failure: Callable[[], None] | None = None,
+        on_policy: Callable[[dict], None] | None = None,
     ):
         self.url = websocket_url(server_url)
         self.token_provider = token_provider
@@ -39,8 +40,10 @@ class WebSocketWorker:
         self.verify_tls = verify_tls
         self.connector = connector
         self.on_auth_failure = on_auth_failure
+        self.on_policy = on_policy
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._connection = None
 
     @property
     def running(self) -> bool:
@@ -55,6 +58,11 @@ class WebSocketWorker:
 
     def stop(self) -> None:
         self._stop.set()
+        connection = self._connection
+        if connection is not None:
+            connection.close()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=12)
 
     def _run(self) -> None:
         backoff = 1.0
@@ -64,6 +72,7 @@ class WebSocketWorker:
                 if self.url.startswith("wss://") and not self.verify_tls:
                     kwargs["ssl"] = ssl._create_unverified_context()
                 with self.connector(self.url, **kwargs) as websocket:
+                    self._connection = websocket
                     backoff = 1.0
                     while not self._stop.is_set():
                         try:
@@ -71,7 +80,13 @@ class WebSocketWorker:
                         except TimeoutError:
                             continue
                         command = json.loads(raw)
+                        if command.get('type') == 'POLICY_UPDATED':
+                            if self.on_policy is not None:
+                                self.on_policy(command.get('payload'))
+                            continue
                         result = self.handler.handle(command)
+                        if not result.command_id:
+                            continue
                         websocket.send(json.dumps({
                             "type": "ack", "command_id": result.command_id,
                             "status": result.status, "error": result.error,
@@ -90,3 +105,5 @@ class WebSocketWorker:
                     LOGGER.warning("WebSocket disconnected: %s", exc)
                     self._stop.wait(backoff + random.uniform(0, backoff * 0.2))
                     backoff = min(backoff * 2, 30)
+            finally:
+                self._connection = None

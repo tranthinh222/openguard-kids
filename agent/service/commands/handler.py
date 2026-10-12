@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +49,8 @@ class ProcessedCommandRepository:
 
 class CommandHandler:
     TYPES = {"LOCK_NOW", "UNLOCK", "ADD_TIME", "REQUEST_REJECTED"}
+    _locks = {}
+    _guard = threading.Lock()
 
     def __init__(
         self,
@@ -56,6 +60,7 @@ class CommandHandler:
         today: Callable = lambda: datetime.now().astimezone().date(),
         on_event: Callable[[dict], None] | None = None,
         remote_lock: RemoteLockRepository | None = None,
+        event_queue=None, event_now=None, policy_id=None,
     ):
         self.repository = repository
         self.usage = usage
@@ -63,8 +68,15 @@ class CommandHandler:
         self.today = today
         self.on_event = on_event or (lambda _event: None)
         self.remote_lock = remote_lock
+        self.event_queue, self.event_now, self.policy_id = event_queue, event_now, policy_id
+        with self._guard:
+            self._mutex = self._locks.setdefault(str(repository.path.resolve()).casefold(), threading.RLock())
 
     def handle(self, command: dict[str, Any]) -> CommandResult:
+        with self._mutex:
+            return self._handle(command)
+
+    def _handle(self, command: dict[str, Any]) -> CommandResult:
         command_id = command.get("command_id")
         command_type = command.get("type")
         if not isinstance(command_id, str) or not command_id:
@@ -97,13 +109,25 @@ class CommandHandler:
                 minutes = payload.get("minutes")
                 if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 240:
                     raise ValueError("ADD_TIME minutes must be between 1 and 240")
-                current = self.usage.get(self.today())
-                self.usage.set_bonus(self.today(), current.bonus_seconds + minutes * 60)
+                with sqlite3.connect(self.repository.path, timeout=10) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    prior = db.execute('SELECT status,error FROM processed_commands WHERE command_id=?', (command_id,)).fetchone()
+                    if prior:
+                        return CommandResult(command_id, prior[0], prior[1], True)
+                    stamp = datetime.now().astimezone().isoformat()
+                    db.execute('INSERT INTO usage_daily VALUES(?,0,?,?) ON CONFLICT(date) DO UPDATE SET '
+                               'bonus_seconds=bonus_seconds+excluded.bonus_seconds,updated_at=excluded.updated_at',
+                               (self.today().isoformat(), minutes * 60, stamp))
+                    db.execute('INSERT INTO processed_commands VALUES(?,?,?,?,?)', (command_id, command_type, 'completed', None, stamp))
+                    if self.event_queue:
+                        self.event_queue.emit('override_granted', self.event_now(), policy_id=self.policy_id(),
+                                              event_id=str(uuid.uuid5(uuid.NAMESPACE_URL, 'override:' + command_id)), connection=db)
                 event = {"type": "TIME_ADDED", "minutes": minutes, "requested": bool(payload.get("request_id"))}
             status = "completed"
         except (ValueError, RuntimeError, OSError, sqlite3.Error) as exc:
             status, error = "failed", str(exc)[:255]
         self.repository.save(command_id, str(command_type), status, error)
         if event is not None and status == "completed":
+            event['command_id'] = command_id
             self.on_event(event)
         return CommandResult(command_id, status, error)

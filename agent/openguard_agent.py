@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import os
 import platform
 import signal
@@ -16,7 +17,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,6 +30,7 @@ from service.commands import CommandHandler, ProcessedCommandRepository
 from service.enforcement import RemoteLockRepository, WorkstationEnforcer
 from service.realtime import WebSocketWorker
 from service.requests import ExtraTimeClient
+from service.events import EventQueue
 from service.screen_time import (
     ScreenTimeCounter,
     UsageRepository,
@@ -36,7 +38,7 @@ from service.screen_time import (
     is_user_active,
 )
 
-AGENT_VERSION = "0.3.0"
+AGENT_VERSION = "0.4.0"
 LOGGER = logging.getLogger("openguard-agent")
 
 # Load one shared project-level file; real environment variables take priority.
@@ -60,6 +62,14 @@ class AgentConfig:
     database_path: Path | None = None
     policy_hmac_secret: str | None = None
     usage_tick_sec: float = 1.0
+    relock_delay_sec: float = 5.0
+    apps_enabled: bool = True
+    dns_enabled: bool = True
+    dns_port: int = 53
+    dns_upstream: str = '1.1.1.1'
+    app_poll_sec: float = 2.0
+    event_sync_sec: float = 5.0
+    report_timezone_offset_minutes: int = 420
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -72,8 +82,19 @@ class AgentConfig:
         }
         state_path = Path(os.getenv("OGK_STATE_PATH", str(default_state_path())))
         tick = float(os.getenv("OGK_USAGE_TICK_SEC", "1"))
+        relock_delay = float(os.getenv('OGK_RELOCK_DELAY_SEC', '5'))
+        if not math.isfinite(relock_delay) or relock_delay < 0:
+            raise ValueError('OGK_RELOCK_DELAY_SEC must be finite and non-negative')
         if not 0.1 <= tick <= 30:
             raise ValueError("Usage tick must be between 0.1 and 30 seconds")
+        dns_port = int(os.getenv('OGK_DNS_PORT', '53'))
+        app_poll = float(os.getenv('OGK_APP_POLL_SEC', '2'))
+        event_sync = float(os.getenv('OGK_EVENT_SYNC_SEC', '5'))
+        report_offset = int(os.getenv('OGK_REPORT_TIMEZONE_OFFSET_MINUTES', '420'))
+        if not -720 <= report_offset <= 840:
+            raise ValueError('Invalid report timezone offset')
+        if not 1 <= dns_port <= 65535 or not .5 <= app_poll <= 30 or not 1 <= event_sync <= 60:
+            raise ValueError('Invalid DNS port, app polling or event sync interval')
         return cls(
             server_url=os.getenv("OGK_SERVER_URL", "http://127.0.0.1:8000").rstrip("/"),
             state_path=state_path,
@@ -83,6 +104,12 @@ class AgentConfig:
             database_path=Path(os.getenv("OGK_DATABASE_PATH", str(state_path.with_name("agent.db")))),
             policy_hmac_secret=os.getenv("OGK_POLICY_HMAC_SECRET") or None,
             usage_tick_sec=tick,
+            relock_delay_sec=relock_delay,
+            apps_enabled=os.getenv('OGK_APPS_ENABLED', 'true').lower() not in {'0', 'false', 'no', 'off'},
+            dns_enabled=os.getenv('OGK_DNS_ENABLED', 'true').lower() not in {'0', 'false', 'no', 'off'},
+            dns_port=dns_port, dns_upstream=os.getenv('OGK_DNS_UPSTREAM', '1.1.1.1'),
+            app_poll_sec=app_poll, event_sync_sec=event_sync,
+            report_timezone_offset_minutes=report_offset,
         )
 
 
@@ -102,9 +129,23 @@ class AgentState:
 
 
 class StateStore:
+    _locks = {}
+    _locks_guard = threading.Lock()
+
     def __init__(self, path: Path):
         self.path = path
-        self._mutex = threading.RLock()
+        with self._locks_guard:
+            self._mutex = self._locks.setdefault(str(path.resolve()).casefold(), threading.RLock())
+
+    def update(self, **changes):
+        with self._mutex:
+            state = self.load()
+            for key, value in changes.items():
+                if key == 'policy_version':
+                    value = max(state.policy_version, value)
+                setattr(state, key, value)
+            self.save(state)
+            return state
 
     def load(self) -> AgentState:
         with self._mutex:
@@ -171,21 +212,66 @@ class AgentClient:
             if config.policy_hmac_secret else None
         )
         self.usage_repository = UsageRepository(database_path)
-        self.clock_monitor = clock_monitor or ClockMonitor(database_path)
-        self.enforcer = WorkstationEnforcer()
+        self.clock_monitor = clock_monitor or ClockMonitor(database_path, report_timezone=timezone(timedelta(minutes=config.report_timezone_offset_minutes)))
+        self.events = EventQueue(database_path, self.store.load().device_id or '__unenrolled__')
+        self.on_event = on_command_event or (lambda event: LOGGER.info('Agent event: %s', event))
+        self.enforcer = WorkstationEnforcer(on_locked=lambda: self.activity('locked'),
+                                           relock_delay_sec=config.relock_delay_sec, state_key=database_path)
         self.remote_lock = RemoteLockRepository(database_path)
         self.command_handler = CommandHandler(
             ProcessedCommandRepository(database_path), self.usage_repository,
             self.enforcer, today=lambda: self.clock_monitor.trusted_now().date(),
-            on_event=on_command_event or (lambda event: LOGGER.info("Command event: %s", event)),
+            on_event=self._command_event,
             remote_lock=self.remote_lock,
+            event_queue=self.events, event_now=self.clock_monitor.trusted_now,
+            policy_id=lambda: self.policy_manager.current.policy_id if self.policy_manager and self.policy_manager.current else None,
         )
         self.extra_time = ExtraTimeClient(self._authorized_post)
+
+    def activity(self, kind, **kwargs):
+        if self.clock_monitor.ready:
+            policy = self.policy_manager.current if self.policy_manager else None
+            return self.events.emit(kind, self.clock_monitor.trusted_now(),
+                                    policy_id=policy.policy_id if policy else None, **kwargs)
+
+    def _command_event(self, event):
+        if event.get('type') in {'TIME_ADDED', 'REMOTE_UNLOCKED'}:
+            key = event.get('command_id')
+            self.activity('override_granted', event_id=str(uuid.uuid5(uuid.NAMESPACE_URL, 'override:' + key)) if key else None)
+        self.on_event(event)
+
+    def accept_policy(self, envelope):
+        if not self.policy_manager:
+            return
+        try:
+            policy = self.policy_manager.accept(envelope)
+        except PolicyRejectedError:
+            return
+        current = self.policy_manager.current
+        self.store.update(policy_version=current.version)
+        self.on_event(dict(type='POLICY_UPDATED', version=current.version))
+        return policy
+
+    def authorized_get(self, path):
+        state = self.store.load()
+        if not state.enrolled:
+            raise AgentNotEnrolledError('Agent is not enrolled')
+        response = self.http.get(path, headers={'Authorization': f'Bearer {state.access_token}'})
+        if response.status_code == 401:
+            self._refresh_access_token(state)
+            response = self.http.get(path, headers={'Authorization': f'Bearer {state.access_token}'})
+        response.raise_for_status()
+        return response.json()
 
     def close(self) -> None:
         self.http.close()
 
     def enroll(self, code: str) -> AgentState:
+        from service.runtime_lock import RuntimeLock
+        with RuntimeLock(self.events.path):
+            return self._enroll(code)
+
+    def _enroll(self, code: str) -> AgentState:
         code = code.strip().upper()
         if len(code) != 8:
             raise ValueError("Enrollment code must contain exactly 8 characters")
@@ -195,12 +281,20 @@ class AgentClient:
         )
         response.raise_for_status()
         payload = response.json()
+        previous_device = self.store.load().device_id
+        if previous_device and previous_device != payload['device_id']:
+            # Callers stop protection before re-pairing. Never apply an old child's policy.
+            with self.events.connect() as db:
+                for table in ('policies', 'usage_daily', 'warning_state', 'processed_commands', 'remote_lock'):
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                        db.execute(f'DELETE FROM {table}')
         state = AgentState(
             device_id=payload["device_id"],
             access_token=payload["access_token"],
             refresh_token=payload["refresh_token"],
         )
         self.store.save(state)
+        self.events.owner = state.device_id
         return state
 
     def heartbeat(self) -> dict[str, Any]:
@@ -211,6 +305,10 @@ class AgentClient:
                  if self.clock_monitor.ready else None)
         if usage is not None:
             state.quota_used_sec = int(usage.used_seconds)
+        elif self.clock_monitor.ready:
+            state.quota_used_sec = 0
+        if self.policy_manager and self.policy_manager.current:
+            state.policy_version = self.policy_manager.current.version
         response = self._send_heartbeat(state)
         if response.status_code == 401:
             refresh = self.http.post(
@@ -218,7 +316,7 @@ class AgentClient:
             )
             refresh.raise_for_status()
             state.access_token = refresh.json()["access_token"]
-            self.store.save(state)
+            self.store.update(access_token=state.access_token)
             response = self._send_heartbeat(state)
         response.raise_for_status()
         payload: dict[str, Any] = response.json()
@@ -236,7 +334,9 @@ class AgentClient:
             self._ack_command(result.command_id, result.status, result.error, state)
         state.last_heartbeat_at = payload["server_time"]
         state.last_server_time = payload["server_time"]
-        self.store.save(state)
+        current = self.policy_manager.current if self.policy_manager else None
+        self.store.update(last_heartbeat_at=state.last_heartbeat_at, last_server_time=state.last_server_time,
+                          quota_used_sec=state.quota_used_sec, policy_version=current.version if current else state.policy_version)
         return payload
 
     def _sync_policy(self, state: AgentState) -> None:
@@ -245,15 +345,17 @@ class AgentClient:
             headers={"Authorization": f"Bearer {state.access_token}"},
         )
         response.raise_for_status()
-        try:
-            policy = self.policy_manager.accept(response.json())  # type: ignore[union-attr]
-        except PolicyRejectedError:
-            return
-        state.policy_version = policy.version
+        policy = self.accept_policy(response.json())
+        if policy:
+            state.policy_version = policy.version
 
     def screen_time_counter(self, on_event: Callable[[dict], None] | None = None) -> ScreenTimeCounter:
         if self.policy_manager is None:
             raise RuntimeError("OGK_POLICY_HMAC_SECRET is required to enforce screen time")
+        def report(event):
+            if event.get('type') == 'TIME_WARNING':
+                self.activity('quota_warning')
+            (on_event or self.on_event)(event)
         return ScreenTimeCounter(
             repository=self.usage_repository,
             policy_provider=lambda: self.policy_manager.current,
@@ -264,16 +366,20 @@ class AgentClient:
             now=self.clock_monitor.trusted_now,
             clock_ready=lambda: self.clock_monitor.ready,
             remote_locked=self.remote_lock.active,
-            on_event=on_event or (lambda event: LOGGER.info("Screen-time event: %s", event)),
+            on_event=report,
         )
 
     def request_extra_time(self, minutes: int = 15) -> dict[str, Any]:
-        return self.extra_time.request(minutes)
+        result = self.extra_time.request(minutes)
+        self.activity('unlock_request')
+        return result
 
     def _authorized_post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         state = self.store.load()
         if not state.enrolled:
             raise AgentNotEnrolledError("Agent is not enrolled; run enroll first")
+        if path.endswith('/events/batch') and state.device_id != self.events.owner:
+            raise RuntimeError('Event queue belongs to a different enrollment')
         response = self.http.post(path, headers={"Authorization": f"Bearer {state.access_token}"}, json=body)
         if response.status_code == 401:
             self._refresh_access_token(state)
@@ -285,7 +391,7 @@ class AgentClient:
         refresh = self.http.post("/api/v1/agent/token/refresh", json={"refresh_token": state.refresh_token})
         refresh.raise_for_status()
         state.access_token = refresh.json()["access_token"]
-        self.store.save(state)
+        self.store.update(access_token=state.access_token)
 
     def _ack_command(self, command_id: str, status: str, error: str | None, state: AgentState | None = None) -> None:
         if not command_id:
@@ -303,6 +409,7 @@ class AgentClient:
             handler=self.command_handler,
             verify_tls=self.config.verify_tls,
             on_auth_failure=self._refresh_for_websocket,
+            on_policy=self.accept_policy,
         )
 
     def _refresh_for_websocket(self) -> None:
@@ -316,6 +423,7 @@ class AgentClient:
                 "policy_version": state.policy_version,
                 "agent_version": AGENT_VERSION,
                 "quota_used_sec": state.quota_used_sec,
+                **({'quota_date': self.clock_monitor.trusted_now().date().isoformat()} if self.clock_monitor.ready else {}),
                 "agent_wall_clock": datetime.now(timezone.utc).isoformat(),
                 # "agent_wall_clock": self.clock_monitor.local_now().isoformat(),
             },
@@ -335,6 +443,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_forever(client: AgentClient, interval: int) -> None:
+    from service.content_runtime import ContentRuntime
+    from service.runtime_lock import RuntimeLock
+    lease = RuntimeLock(client.events.path)
     stopped = threading.Event()
 
     def stop(_signum: int, _frame: object) -> None:
@@ -344,20 +455,19 @@ def run_forever(client: AgentClient, interval: int) -> None:
     signal.signal(signal.SIGTERM, stop)
     counter = client.screen_time_counter()
     websocket = client.websocket_worker()
-    next_heartbeat = 0.0
+    content = ContentRuntime(client, client.on_event)
+    content.start()
+    def heartbeat_loop():
+        while not stopped.is_set():
+            try:
+                client.heartbeat()
+            except Exception:
+                LOGGER.warning('Heartbeat unavailable; cached protection remains active')
+            stopped.wait(interval)
+    heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True, name='openguard-heartbeat')
+    heartbeat_thread.start()
     LOGGER.info("Agent started; heartbeat interval=%s seconds", interval)
     while not stopped.is_set():
-        now = time.monotonic()
-        if now >= next_heartbeat:
-            try:
-                reply = client.heartbeat()
-                LOGGER.info(
-                    "Heartbeat accepted; policy=%s update=%s commands=%s",
-                    reply["policy_version"], reply["policy_update_available"], len(reply.get("commands", [])),
-                )
-            except (httpx.HTTPError, RuntimeError, KeyError) as exc:
-                LOGGER.error("Heartbeat failed: %s", exc)
-            next_heartbeat = now + interval
         try:
             if client.clock_monitor.ready:
                 websocket.start()
@@ -368,6 +478,9 @@ def run_forever(client: AgentClient, interval: int) -> None:
             LOGGER.error("Screen-time tick failed: %s", exc)
         stopped.wait(min(client.config.usage_tick_sec, 5.0))
     websocket.stop()
+    content.stop()
+    heartbeat_thread.join(timeout=client.config.request_timeout_sec * 3 + 1)
+    lease.close()
 
 
 def main() -> int:

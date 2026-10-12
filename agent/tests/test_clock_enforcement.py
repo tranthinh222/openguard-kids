@@ -88,6 +88,9 @@ def test_parent_lock_is_not_delayed_by_startup_clock_sync(tmp_path):
 
 
 def test_gui_heartbeat_and_protection_share_clock(tmp_path, monkeypatch):
+    # This clock unit test must never start host process monitoring or bind DNS.
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(gui_controller, 'ContentRuntime', MagicMock())
     config = AgentConfig("https://server.test", tmp_path / "state.json", policy_hmac_secret="secret")
     controller = AgentController(config)
     controller.store.save(AgentState(device_id="d", access_token="a", refresh_token="r"))

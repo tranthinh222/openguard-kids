@@ -51,8 +51,8 @@ def test_time_added_and_rejection_notify_once(tmp_path):
     assert handler.handle(approved).duplicate is True
     assert handler.handle(rejected).status == "completed"
     assert events == [
-        {"type": "TIME_ADDED", "minutes": 15, "requested": True},
-        {"type": "REQUEST_REJECTED", "response": "Mai nhé"},
+        {"type": "TIME_ADDED", "minutes": 15, "requested": True, "command_id": "c1"},
+        {"type": "REQUEST_REJECTED", "response": "Mai nhé", "command_id": "c2"},
     ]
 
 
@@ -60,7 +60,8 @@ def test_lock_now_relocks_after_child_unlocks_until_parent_unlocks(tmp_path):
     path = tmp_path / "agent.db"
     locks = []
     unlocked = [True]
-    enforcer = WorkstationEnforcer(lock=lambda: locks.append(True) or True)
+    mono = [0.0]
+    enforcer = WorkstationEnforcer(lock=lambda: locks.append(True) or True, monotonic=lambda: mono[0])
     remote_lock = RemoteLockRepository(path)
     usage = UsageRepository(path)
     handler = CommandHandler(ProcessedCommandRepository(path), usage, enforcer, remote_lock=remote_lock)
@@ -74,10 +75,16 @@ def test_lock_now_relocks_after_child_unlocks_until_parent_unlocks(tmp_path):
     assert counter.tick().reason == "session_locked"
     assert len(locks) == 1
 
-    # The child signs back in: the next tick locks again, once per sign-in.
+    # Even after a long stay on the lock screen, sign-in starts a fresh delay.
+    mono[0] = 100
     unlocked[0] = True
     assert counter.tick().reason == "remote_lock"
+    mono[0] = 104.9
     assert counter.tick().reason == "remote_lock"
+    assert len(locks) == 1
+    mono[0] = 105
+    counter.tick()
+    counter.tick()
     assert len(locks) == 2
 
     # A restarted Agent still sees the lock because it is stored in SQLite.

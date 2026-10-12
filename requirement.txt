@@ -20,3 +20,9 @@ httpx==0.28.1
 websockets==17.1
 pytest==9.1.1
 pytest-asyncio==1.4.0
+
+psutil>=7.0,<8
+dnspython>=2.8,<3
+pystray>=0.19.5,<0.20
+Pillow>=11,<13
+tldextract>=5.1,<6
