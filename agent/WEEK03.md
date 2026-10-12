@@ -5,7 +5,7 @@
 Từ thư mục gốc:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r agent/requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirement.txt
 .\.venv\Scripts\python.exe agent/agent_gui.py
 ```
 
@@ -37,15 +37,15 @@ lần, banner trong cửa sổ cập nhật đếm ngược theo nhịp kiểm t
 tạo popup mới mỗi giây. Đếm ngược và thông báo được kết thúc khi hết thời gian,
 khi session khóa lại, hoặc điều kiện khóa đã được gỡ.
 
-| Biến | Mặc định | Ý nghĩa |
-| --- | --- | --- |
-| `OGK_APPS_ENABLED` | `true` | Monitor và chặn app |
-| `OGK_APP_POLL_SEC` | `2` | Polling 0.5–30 giây |
-| `OGK_DNS_ENABLED` | `true` | Bật DNS proxy loopback |
-| `OGK_DNS_PORT` | `53` | UDP và TCP cùng cổng |
-| `OGK_DNS_UPSTREAM` | `1.1.1.1` | IP upstream, không dùng loopback |
-| `OGK_EVENT_SYNC_SEC` | `5` | Upload mỗi 1–60 giây; lỗi backoff tối đa 60 giây |
-| `OGK_REPORT_TIMEZONE_OFFSET_MINUTES` | `420` | Cùng timezone báo cáo server |
+| Biến                                 | Mặc định  | Ý nghĩa                                          |
+| ------------------------------------ | --------- | ------------------------------------------------ |
+| `OGK_APPS_ENABLED`                   | `true`    | Monitor và chặn app                              |
+| `OGK_APP_POLL_SEC`                   | `2`       | Polling 0.5–30 giây                              |
+| `OGK_DNS_ENABLED`                    | `true`    | Bật DNS proxy loopback                           |
+| `OGK_DNS_PORT`                       | `53`      | UDP và TCP cùng cổng                             |
+| `OGK_DNS_UPSTREAM`                   | `1.1.1.1` | IP upstream, không dùng loopback                 |
+| `OGK_EVENT_SYNC_SEC`                 | `5`       | Upload mỗi 1–60 giây; lỗi backoff tối đa 60 giây |
+| `OGK_REPORT_TIMEZONE_OFFSET_MINUTES` | `420`     | Cùng timezone báo cáo server                     |
 
 Các biến môi trường của process ưu tiên hơn `.env`. Không cần sửa secret để test.
 Không tự thay DNS của adapter, chạy process thử nghiệm hoặc terminate app khi chạy
