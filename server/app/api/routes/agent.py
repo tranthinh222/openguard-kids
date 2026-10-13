@@ -1,9 +1,13 @@
 import json
+import asyncio
+import time
+from app.core.config import settings
 from pydantic import ValidationError
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from jwt import InvalidTokenError
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.deps import get_current_device, get_db
 from app.core.database import SessionLocal
@@ -91,35 +95,74 @@ async def device_websocket(websocket: WebSocket):
     else:
         db = SessionLocal()
 
-    device = db.get(Device, payload.get("sub"))
-    if device is None or device.status != "active" or device.revoked_at is not None:
-        db.close()
-        await websocket.close(code=4401)
-        return
-
-    await manager.connect(device.id, websocket)
-
+    device_id = payload['sub']
+    connected = False
     try:
+        device = db.get(Device, device_id)
+        if device is None or device.status != 'active' or device.revoked_at is not None:
+            await websocket.close(code=4401)
+            return
+        await manager.connect(device_id, websocket)
+        connected = True
         # Flush queued commands immediately on connection
         for command in pending_commands(db, device.id):
-            await websocket.send_json(as_agent_command(command).model_dump(mode="json"))
+            await asyncio.wait_for(websocket.send_json(as_agent_command(command).model_dump(mode='json')), timeout=2)
             mark_sent(db, command)
 
+        window, count = time.monotonic(), 0
         while True:
-            message = await websocket.receive_json()
-            if isinstance(message, dict) and message.get("type") == "ack":
-                try:
-                    ack = WebSocketCommandAck.model_validate(message)
-                except ValidationError:
-                    await websocket.close(code=1008, reason="Invalid command ACK")
-                    break
-                ack_command(
-                    db, device.id, ack.command_id, ack.status, ack.error,
-                )
+            # End the read transaction so revocation in another session becomes visible.
+            db.rollback()
+            device = db.get(Device, device_id, populate_existing=True)
+            try:
+                decode_access_token(token)
+            except InvalidTokenError:
+                await websocket.close(code=4401)
+                break
+            if device is None or device.status != 'active' or device.revoked_at is not None:
+                await websocket.close(code=4401)
+                break
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=settings.websocket_auth_interval_sec)
+            except asyncio.TimeoutError:
+                continue
+            if len(raw.encode('utf-8')) > settings.websocket_max_message_bytes:
+                await websocket.close(code=1009)
+                break
+            if time.monotonic() - window >= 60:
+                window, count = time.monotonic(), 0
+            count += 1
+            if count > settings.websocket_messages_per_minute:
+                await websocket.close(code=1008, reason='Too many messages')
+                break
+            # Check again after receive: a device may have been revoked while waiting.
+            db.rollback()
+            device = db.get(Device, device_id, populate_existing=True)
+            if device is None or device.status != 'active' or device.revoked_at is not None:
+                await websocket.close(code=4401)
+                break
+            try:
+                decode_access_token(token)
+                ack = WebSocketCommandAck.model_validate_json(raw)
+            except InvalidTokenError:
+                await websocket.close(code=4401)
+                break
+            except ValidationError:
+                await websocket.close(code=1008, reason='Invalid command ACK')
+                break
+            command = ack_command(db, device_id, ack.command_id, ack.status, ack.error)
+            if command is None:
+                await websocket.close(code=1008, reason='Unknown command')
+                break
     except WebSocketDisconnect:
         pass
+    except (asyncio.TimeoutError, KeyError, ValueError):
+        await websocket.close(code=1008)
+    except SQLAlchemyError:
+        await websocket.close(code=1011, reason='Database temporarily unavailable')
     finally:
-        await manager.disconnect(device.id, websocket)
+        if connected:
+            await manager.disconnect(device_id, websocket)
         if override_gen is not None:
             try:
                 next(override_gen)

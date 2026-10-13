@@ -1,13 +1,16 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+from app.schemas.device import UTCDateTime
 
 class AgentChildRequestCreate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     type: Literal["extra_time"] = "extra_time"
-    requested_minutes: int = Field(default=15, ge=5, le=120)
+    requested_minutes: int = Field(default=15, ge=5, le=120, strict=True)
 
 class RequestDecision(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     response: str | None = Field(default=None, max_length=255)
 
 class ChildRequestResponse(BaseModel):
@@ -18,7 +21,7 @@ class ChildRequestResponse(BaseModel):
     requested_minutes: int
     status: str
     parent_response: str | None
-    created_at: datetime
-    responded_at: datetime | None
+    created_at: UTCDateTime
+    responded_at: UTCDateTime | None
 
     model_config = {"from_attributes": True}

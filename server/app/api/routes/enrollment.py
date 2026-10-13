@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_parent, get_db
+from app.api.deps import get_current_parent, get_current_parent_for_write, get_db
 from app.models.user import User
 from app.models.enrollment import EnrollmentCode
 from app.core.security import utc_now_aware
@@ -28,7 +28,7 @@ router = APIRouter()
 )
 def create_code(
     child_id: str,
-    parent: User = Depends(get_current_parent),
+    parent: User = Depends(get_current_parent_for_write),
     db: Session = Depends(get_db),
 ):
     child = get_owned_child(db, parent.id, child_id)

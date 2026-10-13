@@ -52,7 +52,12 @@ def create_access_token(
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+    payload = jwt.decode(token, settings.jwt_secret, algorithms=['HS256'],
+                         options={'require': ['sub', 'type', 'iat', 'exp']})
+    if (not isinstance(payload['sub'], str) or not payload['sub'] or
+            not isinstance(payload['type'], str) or payload['type'] not in {'parent', 'device'}):
+        raise jwt.InvalidTokenError('Invalid token claims')
+    return payload
 
 def generate_refresh_token() -> str:
     return secrets.token_urlsafe(48)

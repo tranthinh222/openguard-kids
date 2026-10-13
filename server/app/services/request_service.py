@@ -1,10 +1,11 @@
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.security import utc_now
 from app.models.command import DeviceCommand
 from app.models.request import ChildRequest
+from app.models.device import Device
 from app.services.command_service import create_command
 
 def create_child_request(
@@ -64,19 +65,25 @@ def decide_request(
     if item .status != "pending":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Request already decided")
 
-    item.status = "approved" if approve else "rejected"
-    item.parent_response = response
-    item.responded_at = utc_now()
-    item.responded_by = parent_id
+    device = db.get(Device, item.device_id)
+    if device is None or device.status != 'active' or device.revoked_at is not None:
+        raise HTTPException(status_code=409, detail='Device is revoked or inactive')
+    claimed = db.execute(update(ChildRequest).where(
+        ChildRequest.id == item.id, ChildRequest.child_id == child_id, ChildRequest.status == 'pending',
+    ).values(status='approved' if approve else 'rejected', parent_response=response,
+             responded_at=utc_now(), responded_by=parent_id).execution_options(synchronize_session=False))
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail='Request already decided')
 
     # The agent needs a command in both cases so the child sees the decision.
     command = None
     if item.type == "extra_time":
         body = {"minutes": item.requested_minutes, "request_id": item.id}
         if approve:
-            command = create_command(db, item.device_id, "ADD_TIME", body)
+            command = create_command(db, item.device_id, "ADD_TIME", body, commit=False)
         else:
-            command = create_command(db, item.device_id, "REQUEST_REJECTED", {**body, "response": response})
+            command = create_command(db, item.device_id, "REQUEST_REJECTED", {**body, "response": response}, commit=False)
 
     db.commit()
     db.refresh(item)

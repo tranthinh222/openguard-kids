@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 
 def as_utc(value: datetime) -> datetime:
@@ -12,7 +12,8 @@ def as_utc(value: datetime) -> datetime:
 UTCDateTime = Annotated[datetime, AfterValidator(as_utc)]
 
 class DeviceRefreshRequest(BaseModel):
-    refresh_token: str
+    model_config = ConfigDict(extra='forbid')
+    refresh_token: str = Field(min_length=1, max_length=256)
 
 class DeviceAccessTokenResponse(BaseModel):
     access_token: str

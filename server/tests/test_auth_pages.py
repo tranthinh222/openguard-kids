@@ -6,7 +6,7 @@ def test_auth_pages_and_nested_assets(client):
         response = client.get(path)
         assert response.status_code == 200
         assert f'id="{form}"' in response.text
-        assert 'href="/static/css/app.css"' in response.text
+        assert 'href="/static/css/app.css?v=' in response.text
         assert 'href="/register"' in response.text
         assert 'href="/login"' in response.text
     assert client.get("/static/js/register.js").status_code == 200

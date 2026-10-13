@@ -34,6 +34,8 @@ async def parent_create_command(
     db: Session = Depends(get_db),
 ):
     device = owned_device(db, parent.id, device_id)
+    if device.status != 'active' or device.revoked_at is not None:
+        raise HTTPException(409, 'Device is revoked or inactive')
     body = {"minutes": payload.minutes} if payload.type == "ADD_TIME" else {}
 
     if payload.type == "ADD_TIME" and payload.minutes is None:

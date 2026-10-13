@@ -1,9 +1,10 @@
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict, StrictBool
 from app.schemas.content_rules import AppRule, DomainPolicy
 
 class ScreenTimePolicy(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
     weekday_minutes: int = Field(default=90, ge=1, le=1440)
     weekend_minutes: int = Field(default=120, ge=1, le=1440)
     idle_timeout_sec: int = Field(default=300, ge=60, le=3600)
@@ -19,9 +20,10 @@ class ScreenTimePolicy(BaseModel):
         return cleaned
 
 class PolicyPayload(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     screen_time: ScreenTimePolicy = Field(default_factory=ScreenTimePolicy)
     # 7 days x 48 half-hour slots. True means usage is allowed.
-    weekly_schedule: list[bool] = Field(default_factory=lambda: [True] * 336)
+    weekly_schedule: list[StrictBool] = Field(default_factory=lambda: [True] * 336, min_length=336, max_length=336)
     apps: list[AppRule] = Field(default_factory=list, max_length=500)
     domains: DomainPolicy = Field(default_factory=DomainPolicy)
 
@@ -48,6 +50,7 @@ class PolicyPayload(BaseModel):
         return value
 
 class PolicyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     payload: PolicyPayload
 
 class PolicyResponse(BaseModel):

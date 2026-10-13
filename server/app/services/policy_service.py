@@ -3,6 +3,8 @@ import logging
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException
 
 from app.core.security import sign_policy
 from app.models.policy import Policy
@@ -64,7 +66,11 @@ def update_policy(db: Session, child_id: str, payload: PolicyPayload, actor_id: 
     db.add(policy)
     db.add(PolicyAudit(child_id=child_id, actor_id=actor_id, old_version=previous.version,
                        new_version=version, old_payload=previous.payload, new_payload=data))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, 'Policy changed concurrently; reload before saving again') from exc
     db.refresh(policy)
 
     return policy

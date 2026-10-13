@@ -5,8 +5,8 @@ import { initDashboardPage } from "./dashboard.js";
 import { initChildrenPage } from "./children.js";
 import { initChildCreatePage } from "./child-create.js";
 import { initChildDetailPage } from "./child-detail.js";
-import { initPoliciesPage, initPolicyDetailPage } from "./policies.js?v=w03";
-import { initReportsPage } from "./reports.js?v=w03";
+import { initPoliciesPage, initPolicyDetailPage } from "./policies.js";
+import { initReportsPage } from "./reports.js";
 import { initRequestsPage } from "./requests.js";
 
 async function main() {

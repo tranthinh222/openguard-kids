@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -53,6 +53,13 @@ def enroll_device(
     if record.expires_at < now:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enrollment code expired")
 
+    claimed = db.execute(update(EnrollmentCode).where(
+        EnrollmentCode.id == record.id, EnrollmentCode.used_at.is_(None), EnrollmentCode.expires_at > now,
+    ).values(used_at=now).execution_options(synchronize_session=False))
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail='Enrollment code already used or expired')
+
     device = Device(
         child_id=record.child_id,
         device_name=device_name,
@@ -68,11 +75,10 @@ def enroll_device(
     refresh_record = DeviceRefreshToken(
         device_id=device.id,
         token_hash=hash_secret(refresh_token),
-        expires_at=now + timedelta(settings.device_refresh_token_expire_days),
+        expires_at=now + timedelta(days=settings.device_refresh_token_expire_days),
     )
     db.add(refresh_record)
 
-    record.used_at = now
     db.commit()
     db.refresh(device)
 

@@ -4,6 +4,8 @@ import { startLiveRefresh } from "./live-refresh.js";
 
 let allRequests = [];
 let allChildren = [];
+const decisions = new Map();
+const submitting = new Set();
 
 function statusMeta(status) {
   if (status === "approved")
@@ -59,7 +61,11 @@ function requestCard(item) {
     approve.type = "button";
     approve.className = "btn btn-sm btn-primary";
     approve.textContent = "Duyệt";
+    approve.disabled = submitting.has(item.id);
     approve.addEventListener("click", async () => {
+      if (submitting.has(item.id)) return;
+      submitting.add(item.id);
+      reject.disabled = true;
       setButtonBusy(approve, true, "Đang duyệt...");
       try {
         await apiWrite(
@@ -67,13 +73,17 @@ function requestCard(item) {
           "POST",
           {},
         );
+        decisions.set(item.id, 'approved');
+        item.status = 'approved';
         showToast(
           `Đã duyệt thêm ${item.requested_minutes} phút cho ${item.child_name}.`,
         );
       } catch (error) {
         showToast(error.message, true);
       } finally {
+        submitting.delete(item.id);
         setButtonBusy(approve, false);
+        renderFiltered();
       }
     });
 
@@ -81,7 +91,11 @@ function requestCard(item) {
     reject.type = "button";
     reject.className = "btn btn-sm btn-outline-secondary";
     reject.textContent = "Từ chối";
+    reject.disabled = submitting.has(item.id);
     reject.addEventListener("click", async () => {
+      if (submitting.has(item.id)) return;
+      submitting.add(item.id);
+      approve.disabled = true;
       setButtonBusy(reject, true, "Đang xử lý...");
       try {
         await apiWrite(
@@ -89,11 +103,15 @@ function requestCard(item) {
           "POST",
           {},
         );
+        decisions.set(item.id, 'rejected');
+        item.status = 'rejected';
         showToast(`Đã từ chối yêu cầu của ${item.child_name}.`);
       } catch (error) {
         showToast(error.message, true);
       } finally {
+        submitting.delete(item.id);
         setButtonBusy(reject, false);
+        renderFiltered();
       }
     });
     actions.prepend(approve, reject);
@@ -117,7 +135,7 @@ function renderFiltered() {
   host.replaceChildren();
   const childId = selectedChild();
   const status = selectedStatus();
-  const filtered = allRequests.filter(
+  const filtered = allRequests.map(item => ({...item, status: decisions.get(item.id) || item.status})).filter(
     (item) =>
       (!childId || item.child_id === childId) &&
       (!status || item.status === status),
@@ -190,6 +208,7 @@ async function loadRequests(signal) {
 }
 
 function renderRequestsError(error) {
+  if (allRequests.length) return; // Preserve usable data; shared refresh banner marks it stale.
   const host = document.getElementById("requests-list");
   host.replaceChildren();
   const alert = document.createElement("div");

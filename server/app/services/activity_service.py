@@ -45,11 +45,12 @@ def ingest_events(db, device, entries):
             occurred = item.ts.astimezone(timezone.utc).replace(tzinfo=None)
             # Offline history is valid. A fresh known-bad wall clock or a future
             # timestamp makes its occurrence time unsuitable for aggregation.
-            fresh = device.last_seen_at and now - device.last_seen_at < timedelta(seconds=120)
+            fresh = device.last_seen_at and timedelta(0) <= now - device.last_seen_at < timedelta(seconds=120)
             bad_clock = fresh and device.clock_drift_sec is not None and abs(device.clock_drift_sec) > settings.agent_clock_drift_threshold_sec
             if occurred < now - timedelta(days=90) and not bad_clock:
                 raise ValueError("outside_retention")
-            trusted = not bad_clock and occurred <= now + timedelta(seconds=settings.agent_clock_drift_threshold_sec)
+            unknown_clock = fresh and device.clock_drift_sec is None
+            trusted = not bad_clock and not unknown_clock and occurred <= now + timedelta(seconds=settings.agent_clock_drift_threshold_sec)
             values = dict(event_id=event_id, child_id=device.child_id, device_id=device.id,
                           type=item.type, subject=item.subject, duration_sec=item.duration_sec,
                           policy_id=policy_id, occurred_at=occurred, received_at=now,

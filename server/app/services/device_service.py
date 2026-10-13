@@ -17,7 +17,7 @@ def device_is_online(device: Device) -> bool:
 
     age = (utc_now() - device.last_seen_at).total_seconds()
 
-    return age < ONLINE_TIMEOUT_SECONDS
+    return 0 <= age < ONLINE_TIMEOUT_SECONDS
 
 def process_heartbeat(
     db: Session, 

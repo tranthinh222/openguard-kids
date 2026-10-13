@@ -1,7 +1,7 @@
 import { apiRequest, apiWrite } from "./api.js";
 import { setButtonBusy, showToast } from "./common.js";
 import { startLiveRefresh } from "./live-refresh.js";
-import { fillContentRules, initContentRules, readContentRules } from "./content-rules.js?v=w03";
+import { fillContentRules, initContentRules, readContentRules } from "./content-rules.js";
 
 const DAYS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
 let policyState = null;

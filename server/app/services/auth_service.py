@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password, utc_now, verify_password
@@ -37,7 +38,11 @@ def register_parent(db: Session, email: str, password: str) -> User:
         role="parent",
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, 'Email already registered') from exc
     db.refresh(user)
 
     return user

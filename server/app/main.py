@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 import asyncio
+import logging
 from contextlib import suppress
 
 from fastapi import FastAPI
@@ -18,9 +19,14 @@ from app.web.routes import reports as web_reports
 from app.api.routes import activity
 from app.api.deps import get_db
 from app.services.retention import retention_loop
+from app.core.http_security import SecurityMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from fastapi import Depends, HTTPException
+from sqlalchemy.orm import Session
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logging.basicConfig(level=settings.log_level.upper(), format='%(asctime)s %(levelname)s %(name)s %(message)s')
     # Database schema is managed by Alembic; do not create tables here
     # Test clients override get_db with isolated databases; never clean the live DB there.
     task = None if get_db in app.dependency_overrides else asyncio.create_task(retention_loop())
@@ -34,13 +40,27 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.1.0",
+    version="0.4.0",
+    docs_url='/docs' if settings.environment.lower() in {'development', 'test'} else None,
+    redoc_url=None,
     lifespan=lifespan,
 )
+app.add_middleware(SecurityMiddleware, config=settings)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
 @app.get("/health", tags=["System"])
 def health():
     return {"status": "ok"}
+
+@app.get('/ready', tags=['System'])
+def readiness(db: Session = Depends(get_db)):
+    try:
+        from app.services.maintenance import schema_ready
+        if not schema_ready(db.connection()):
+            raise RuntimeError('Migrations are not current')
+    except Exception as exc:
+        raise HTTPException(503, 'Database is not ready') from exc
+    return {'status': 'ready'}
 
 # Agent / programmatic API
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])

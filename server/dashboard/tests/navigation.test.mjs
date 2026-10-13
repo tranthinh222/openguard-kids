@@ -18,7 +18,8 @@ test("Week 02 gives Policies and Requests first-class navigation routes", () => 
   assert.doesNotMatch(base, /\/children\?view=policies/);
   assert.doesNotMatch(base, /\/children\?view=requests/);
   assert.match(base, /href="\/reports"/);
-  assert.match(base, /app\.js\?v=w03/);
+  assert.match(base, /app\.js\?v=\{\{ asset_version \}\}/);
+  assert.match(base, /type="importmap"/);
 });
 
 test("Children detail keeps child/device/enrollment role and links to workspaces", () => {

@@ -50,6 +50,7 @@ def report_summary(db, child_id, start=None, end=None, device_id=None):
               "has_data": start + timedelta(days=i) in totals} for i in range((end - start).days + 1)]
     return {
         "child_id": child_id, "start": start.isoformat(), "end": end.isoformat(),
+        "today": utc_now().replace(tzinfo=timezone.utc).astimezone(report_timezone()).date().isoformat(),
         "timezone_offset_minutes": int(report_timezone().utcoffset(None).total_seconds() / 60),
         "screen_time_sec": sum(totals.values()), "screen_time_source": "heartbeat_daily_max",
         "has_screen_time_data": bool(totals), "daily": daily,

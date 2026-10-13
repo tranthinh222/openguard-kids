@@ -12,6 +12,7 @@ export function startLiveRefresh(
   let failures = 0;
   let previous;
   let refreshOnCompletion = false;
+  let retryAfterMs = 0;
 
   function describe(message, stale = false) {
     if (!status) return;
@@ -43,6 +44,7 @@ export function startLiveRefresh(
         previous = snapshot;
       }
       failures = 0;
+      retryAfterMs = 0;
       describe("Tự động cập nhật · Vừa đồng bộ");
     } catch (error) {
       if (
@@ -62,6 +64,7 @@ export function startLiveRefresh(
         return;
       }
       failures += 1;
+      retryAfterMs = error.retryAfterMs || 0;
       describe("Chưa cập nhật được dữ liệu. Đang tự kết nối lại…", true);
     } finally {
       clearTimeout(timeout);
@@ -71,7 +74,7 @@ export function startLiveRefresh(
           ? 0
           : Math.min(intervalMs * 2 ** Math.min(failures, 3), 30000);
         refreshOnCompletion = false;
-        timer = setTimeout(refresh, delay);
+        timer = setTimeout(refresh, Math.max(delay, retryAfterMs));
       }
     }
   }

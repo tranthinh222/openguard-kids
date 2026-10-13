@@ -1,12 +1,13 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+from app.schemas.device import UTCDateTime
 
 class EnrollmentCodeResponse(BaseModel):
     enrollment_id: str
     code: str
-    expires_at: datetime
+    expires_at: UTCDateTime
 
 class EnrollmentStatusResponse(BaseModel):
     enrollment_id: str
@@ -14,6 +15,7 @@ class EnrollmentStatusResponse(BaseModel):
 
 
 class AgentEnrollRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     code: str = Field(min_length=8, max_length=8)
     device_name: str = Field(min_length=1, max_length=255)
     fingerprint: str = Field(min_length=8, max_length=2048)

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Literal
+import hmac
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -111,7 +112,7 @@ def get_current_parent_for_write(
     # dashboard requests must send the per-session CSRF token explicitly.
     if auth.method == "session":
         supplied = request.headers.get(CSRF_HEADER_NAME, "")
-        if auth.session is None or supplied != auth.session.csrf_token:
+        if auth.session is None or not hmac.compare_digest(supplied.encode(), auth.session.csrf_token.encode()):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, 
                 detail="Invalid CSRF token"

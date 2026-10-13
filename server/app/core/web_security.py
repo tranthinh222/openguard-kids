@@ -9,7 +9,7 @@ def verify_login_csrf(request: Request) -> None:
     cookie_token = request.cookies.get(LOGIN_CSRF_COOKIE_NAME, "")
     header_token = request.headers.get(CSRF_HEADER_NAME, "")
 
-    if not cookie_token or not header_token or not hmac.compare_digest(cookie_token, header_token):
+    if not cookie_token or not header_token or not hmac.compare_digest(cookie_token.encode(), header_token.encode()):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid login CSRF token",

@@ -16,7 +16,8 @@ def create_command(
     db: Session, 
     device_id: str, 
     command_type: str, 
-    payload: dict | None = None
+    payload: dict | None = None,
+    *, commit: bool = True,
 ) -> DeviceCommand:
     command = DeviceCommand(
         device_id=device_id,
@@ -26,8 +27,11 @@ def create_command(
     )
 
     db.add(command)
-    db.commit()
-    db.refresh(command)
+    if commit:
+        db.commit()
+        db.refresh(command)
+    else:
+        db.flush()
 
     return command
 

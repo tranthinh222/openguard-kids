@@ -13,7 +13,7 @@
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
       rel="stylesheet"
     />
-    <link href="/static/css/app.css" rel="stylesheet" />
+    <link href="/static/css/app.css?v={{ asset_version }}" rel="stylesheet" />
   </head>
   <body
     data-page="{{ page_name|default('') }}"
@@ -124,6 +124,7 @@
     ></div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script type="module" src="/static/js/app.js?v=w03"></script>
+    <script type="importmap">{{ {'imports': asset_imports} | tojson }}</script>
+    <script type="module" src="/static/js/app.js?v={{ asset_version }}"></script>
   </body>
 </html>

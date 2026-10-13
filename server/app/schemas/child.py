@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class ChildCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     display_name: str = Field(min_length=1, max_length=100)
     birth_year: int | None = Field(default=None, ge=2000, le=2100)
 

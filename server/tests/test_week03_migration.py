@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, inspect, text
 
 from app.core.config import settings
 from app.models.base import Base
+from app.services.maintenance import schema_ready
 
 
 def test_week03_migration_upgrade_downgrade_preserves_existing_tables(tmp_path, monkeypatch):
@@ -17,9 +18,12 @@ def test_week03_migration_upgrade_downgrade_preserves_existing_tables(tmp_path, 
     config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "migrations"))
     command.upgrade(config, "c8d1f2a7b901")
     engine = create_engine(url)
+    with engine.connect() as connection:
+        assert not schema_ready(connection)
     command.upgrade(config, "head")
     with engine.connect() as connection:
         assert connection.scalar(text("select version_num from alembic_version")) == "e31008a1"
+        assert schema_ready(connection)
         names = inspect(connection).get_table_names()
         assert {"activity_events", "screen_usage_daily", "policy_audits", "users", "policies"} <= set(names)
         diffs = compare_metadata(MigrationContext.configure(connection), Base.metadata)

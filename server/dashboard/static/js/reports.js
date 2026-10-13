@@ -1,5 +1,6 @@
 import { apiRequest, apiError } from "./api.js";
 import { startLiveRefresh } from "./live-refresh.js";
+import { validateReportRange } from './report-input.js';
 
 const el = id => document.getElementById(id);
 const duration = seconds => `${Math.floor(seconds / 3600)} giờ ${Math.floor(seconds % 3600 / 60)} phút ${seconds % 60} giây`;
@@ -38,7 +39,7 @@ function render(data) {
   table("top-blocks", data.blocks, "count");
 }
 
-export async function initReportsPage() {
+async function initializeReports() {
   const children = await apiRequest("/api/v1/children");
   if (!children.length) {
     el("report-status").textContent = "Chưa có trẻ. Thêm hồ sơ trẻ để bắt đầu xem báo cáo.";
@@ -49,7 +50,8 @@ export async function initReportsPage() {
   if (children.some(child => child.id === requested)) el("report-child").value = requested;
   const initial = await apiRequest(`/api/v1/children/${encodeURIComponent(el("report-child").value)}/reports/summary`);
   el("report-start").value = initial.start; el("report-end").value = initial.end;
-  const today = initial.end;
+  let today = initial.today || initial.end;
+  let exporting = false;
   let stop, currentUrl;
   function load() {
     stop?.();
@@ -57,11 +59,14 @@ export async function initReportsPage() {
     el("report-export").disabled = true;
     el("report-status").textContent = "Đang tải...";
     const params = new URLSearchParams({start: el("report-start").value, end: el("report-end").value});
+    const invalid = validateReportRange(params.get('start'), params.get('end'), today);
+    if (invalid) { el('report-status').textContent = invalid; return; }
     currentUrl = `/api/v1/children/${encodeURIComponent(el("report-child").value)}/reports`;
     const url = `${currentUrl}/summary?${params}`;
     const exportUrl = `${currentUrl}/export.csv?${params}`;
     stop = startLiveRefresh(signal => apiRequest(url, {signal, cache: "no-store"}), data => {
-      render(data); el("report-export").disabled = false; el("report-export").dataset.url = exportUrl;
+      today = data.today || today;
+      render(data); el("report-export").disabled = exporting; el("report-export").dataset.url = exportUrl;
     }, { intervalMs: 15000, onError: error => {
       // Existing data stays usable during a transient polling failure. The
       // shared refresh status shows stale state and clears itself on recovery.
@@ -81,13 +86,36 @@ export async function initReportsPage() {
   el("report-child").addEventListener("change", load);
   el("report-load").addEventListener("click", load);
   el("report-export").addEventListener("click", async () => {
+    if (el('report-export').disabled || exporting) return;
+    exporting = true;
+    const exportedUrl = el('report-export').dataset.url;
+    el('report-export').disabled = true;
     try {
-      const response = await fetch(el("report-export").dataset.url, { credentials: "same-origin" });
+      const response = await fetch(exportedUrl, { credentials: "same-origin", cache: 'no-store' });
       if (!response.ok) throw await apiError(response);
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a"); link.href = url; link.download = "openguard-report.csv";
       link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) { el("report-status").textContent = error.message; }
+    finally {
+      exporting = false;
+      if (!el('report-results').hidden) el('report-export').disabled = false;
+    }
   });
   load();
+}
+
+export async function initReportsPage() {
+  el('report-load').disabled = true;
+  el('report-export').disabled = true;
+  el('report-status').textContent = 'Đang tải danh sách trẻ và báo cáo…';
+  try {
+    el('report-child').replaceChildren();
+    await initializeReports();
+    el('report-load').disabled = !el('report-child').options.length;
+  } catch (error) {
+    el('report-status').textContent = `Không tải được báo cáo: ${error.message}`;
+    el('report-load').disabled = false;
+    el('report-load').addEventListener('click', initReportsPage, {once: true});
+  }
 }

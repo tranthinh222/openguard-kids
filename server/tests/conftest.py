@@ -8,6 +8,13 @@ from app.api.deps import get_db
 from app.main import app
 from app.models.base import Base
 from app import models as _models
+from app.core.config import settings
+
+@pytest.fixture(autouse=True)
+def isolated_rate_limits(monkeypatch):
+    # Ordinary API tests aren't a single client issuing hundreds of requests per minute.
+    # Limiter-specific tests explicitly enable it with their own application instance.
+    monkeypatch.setattr(settings, 'rate_limit_enabled', False)
 
 @pytest.fixture()
 def db_session():
