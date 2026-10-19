@@ -106,6 +106,7 @@ def test_gui_heartbeat_and_protection_share_clock(tmp_path, monkeypatch):
             pass
 
     def make_client(*args, **kwargs):
+        kwargs.pop('transport', None)
         client = AgentClient(*args, **kwargs, transport=httpx.MockTransport(lambda _: httpx.Response(200, json={
             "server_time": "2026-10-05T12:00:00Z", "clock_trusted": False,
             "clock_drift_sec": 999999, "clock_drift_threshold_sec": 120,
