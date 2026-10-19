@@ -76,7 +76,8 @@ sequenceDiagram
 - Dashboard và agent gọi server qua HTTPS; bản triển khai chính thức yêu cầu TLS 1.2+.
 - Agent gửi heartbeat mỗi 60 giây.
 - Lệnh khẩn sử dụng WebSocket và phải đến agent trong vòng 5 giây.
-- Tray UI giao tiếp với Agent Service bằng named pipe hoặc HTTP localhost có token.
+- Tray UI giao tiếp với Agent Service bằng named pipe `\\.\pipe\OpenGuardKids` có DACL riêng
+  (Week 04, `agent/WEEK04.md`); Tray không giữ token hay database, đóng Tray không dừng bảo vệ.
 - Khi ngoại tuyến, agent tiếp tục dùng policy cache, đếm giờ và đệm sự kiện để đồng bộ lại theo lô.
 - Policy có phiên bản và chữ ký toàn vẹn; agent từ chối policy bị sửa đổi.
 

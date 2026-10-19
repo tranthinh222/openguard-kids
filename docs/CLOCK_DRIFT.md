@@ -33,9 +33,12 @@ Thời điểm đồng bộ cuối cũng dùng timestamp server. Cảnh báo dri
 ngay từ lần đồng bộ đầu tiên.
 
 Mất mạng trong cùng phiên chạy: tiếp tục dùng server anchor + monotonic và policy cache.
-Khởi động lại: không coi timestamp đã lưu hoặc đồng hồ local là nguồn giờ tin cậy,
-vì chưa có cách xác minh thời gian đã trôi qua giữa các lần chạy.
-Nếu có policy cache nhưng chưa heartbeat thành công, counter chờ tối đa 30 giây
+Khởi động lại (Week 04, chi tiết ở `agent/WEEK04.md` mục A3): anchor được lưu trong
+bảng `clock_anchor`. Restart process trong cùng boot dùng lại anchor + monotonic
+(mode `restored`). Sau reboot chưa có server, mặc định dùng giờ Windows nhưng không
+sớm hơn mốc tin cậy cuối (`provisional`); `OGK_OFFLINE_CLOCK=strict` giữ hành vi
+fail-closed dưới đây.
+Nếu có policy cache nhưng chưa heartbeat thành công (chế độ strict), counter chờ tối đa 30 giây
 từ lúc khởi tạo bằng monotonic clock (`clock_sync_pending`), không khóa máy trong
 khoảng chờ này. Khi đồng bộ thành công, quota/lịch được áp dụng ngay, không đợi hết
 30 giây. Nếu hết hạn vẫn chưa có giờ tin cậy, counter trả `clock_unverified` và
@@ -44,11 +47,9 @@ bởi các lần tick hoặc retry heartbeat. Lệnh LOCK_NOW đã lưu vẫn kh
 Thiết bị chưa có policy không
 bị khóa bởi nhánh này. WebSocket bắt đầu sau khi có anchor, tránh cộng giờ nhầm ngày.
 
-Đây là lựa chọn fail-closed cho restart/offline; chưa triển khai trusted-clock
-persistence qua reboot. Grace persistence và việc tách Windows Service khỏi Tray
-là các vấn đề riêng, chưa được giải quyết bởi bản sửa drift.
-Khoảng chờ khởi động được tạo lại khi runtime được khởi tạo lại; chống việc cố ý
-restart liên tục cần xử lý cùng vòng đời Service và trạng thái khởi động bền vững.
+Grace được lưu trong `grace_state` nên restart giữa grace không cấp grace mới.
+Runtime chạy trong Windows Service; trẻ không restart được service (DACL), và restart
+trong cùng boot không làm mất anchor nên không còn tạo lại khoảng chờ 30 giây.
 
 ## Kiểm tra thủ công
 
@@ -61,9 +62,10 @@ restart liên tục cần xử lý cùng vòng đời Service và trạng thái 
 6. Xin thêm 15 phút: request vẫn thành công, created_at theo giờ server;
    sau khi phụ huynh duyệt, bonus được cộng vào ngày theo trusted clock.
 7. Khôi phục đồng hồ agent: heartbeat tiếp theo trả trusted true, cảnh báo được gỡ.
-8. Mất mạng sau khi đồng bộ: enforcement tiếp tục. Restart agent khi mất mạng
-   và có policy cache: hiển thị chờ xác minh giờ, khóa máy sau 30 giây nếu chưa
-   đồng bộ được; kết nối lại để phục hồi.
+8. Mất mạng sau khi đồng bộ: enforcement tiếp tục. Restart service khi mất mạng:
+   giờ được khôi phục (`restored`), quota/lịch giữ nguyên. Reboot khi mất mạng:
+   mode `provisional`; với `OGK_OFFLINE_CLOCK=strict` máy bị khóa sau 30 giây
+   tới khi kết nối lại.
 
 Nếu server và agent chạy trên cùng Windows hoặc VM tự đồng bộ giờ với host đang
 bị chỉnh, cả hai đồng hồ có thể lệch cùng nhau. Khi đó drift gần 0 là kết quả đúng
