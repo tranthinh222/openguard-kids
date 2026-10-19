@@ -11,10 +11,8 @@ import os
 import platform
 import signal
 import socket
-import sqlite3
 import tempfile
 import threading
-import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone, timedelta
@@ -31,18 +29,31 @@ from service.enforcement import RemoteLockRepository, WorkstationEnforcer
 from service.realtime import WebSocketWorker
 from service.requests import ExtraTimeClient
 from service.events import EventQueue
-from service.screen_time import (
-    ScreenTimeCounter,
-    UsageRepository,
-    is_session_unlocked,
-    is_user_active,
-)
+from service.host import InteractiveHost
+from service.screen_time import ScreenTimeCounter, UsageRepository
 
 AGENT_VERSION = "0.4.0"
 LOGGER = logging.getLogger("openguard-agent")
 
-# Load one shared project-level file; real environment variables take priority.
-load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+
+def protected_env_path() -> Path | None:
+    """Service configuration written by the installer; readable only by SYSTEM/Administrators."""
+    program_data = os.getenv("PROGRAMDATA")
+    return Path(program_data) / "OpenGuardKids" / "agent.env" if os.name == "nt" and program_data else None
+
+
+def load_environment() -> None:
+    # Real environment variables take priority, then the protected file, then the project file.
+    for path in (protected_env_path(), Path(__file__).resolve().parents[1] / ".env"):
+        if path is None:
+            continue
+        try:
+            load_dotenv(path, override=False)
+        except OSError:
+            pass  # The tray runs as the child and is not allowed to read the protected file.
+
+
+load_environment()
 
 
 def default_state_path() -> Path:
@@ -70,6 +81,9 @@ class AgentConfig:
     app_poll_sec: float = 2.0
     event_sync_sec: float = 5.0
     report_timezone_offset_minutes: int = 420
+    offline_clock_mode: str = 'provisional'
+    dns_autoconfig: str = 'auto'
+    dns_failure_mode: str = 'open'
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -93,6 +107,13 @@ class AgentConfig:
         report_offset = int(os.getenv('OGK_REPORT_TIMEZONE_OFFSET_MINUTES', '420'))
         if not -720 <= report_offset <= 840:
             raise ValueError('Invalid report timezone offset')
+        offline_clock = os.getenv('OGK_OFFLINE_CLOCK', 'provisional').lower()
+        if offline_clock not in {'provisional', 'strict'}:
+            raise ValueError('OGK_OFFLINE_CLOCK must be provisional or strict')
+        dns_autoconfig = os.getenv('OGK_DNS_AUTOCONFIG', 'auto').lower()
+        dns_failure = os.getenv('OGK_DNS_FAILURE_MODE', 'open').lower()
+        if dns_autoconfig not in {'auto', 'true', 'false'} or dns_failure not in {'open', 'closed'}:
+            raise ValueError('OGK_DNS_AUTOCONFIG must be auto/true/false and OGK_DNS_FAILURE_MODE open/closed')
         if not 1 <= dns_port <= 65535 or not .5 <= app_poll <= 30 or not 1 <= event_sync <= 60:
             raise ValueError('Invalid DNS port, app polling or event sync interval')
         return cls(
@@ -110,7 +131,20 @@ class AgentConfig:
             dns_port=dns_port, dns_upstream=os.getenv('OGK_DNS_UPSTREAM', '1.1.1.1'),
             app_poll_sec=app_poll, event_sync_sec=event_sync,
             report_timezone_offset_minutes=report_offset,
+            offline_clock_mode=offline_clock,
+            dns_autoconfig=dns_autoconfig, dns_failure_mode=dns_failure,
         )
+
+    def dns_autoconfig_enabled(self, service: bool) -> bool:
+        """Adapters can only point at port 53; `auto` changes them only when running as the Service."""
+        if self.dns_port != 53:
+            return False
+        return self.dns_autoconfig == 'true' or (self.dns_autoconfig == 'auto' and service)
+
+    def clock_monitor(self) -> ClockMonitor:
+        return ClockMonitor(self.database_path or self.state_path.with_name("agent.db"),
+                            report_timezone=timezone(timedelta(minutes=self.report_timezone_offset_minutes)),
+                            allow_provisional=self.offline_clock_mode != 'strict')
 
 
 @dataclass
@@ -122,6 +156,7 @@ class AgentState:
     quota_used_sec: int = 0
     last_heartbeat_at: str | None = None
     last_server_time: str | None = None
+    server_url: str | None = None
 
     @property
     def enrolled(self) -> bool:
@@ -197,9 +232,12 @@ class AgentClient:
         transport: httpx.BaseTransport | None = None,
         on_command_event: Callable[[dict], None] | None = None,
         clock_monitor: ClockMonitor | None = None,
+        host=None,
     ):
         self.config = config
         self.store = store
+        # Session probes, workstation lock and process list differ between console and Service.
+        self.host = host or InteractiveHost()
         self.http = httpx.Client(
             base_url=config.server_url,
             timeout=config.request_timeout_sec,
@@ -212,10 +250,10 @@ class AgentClient:
             if config.policy_hmac_secret else None
         )
         self.usage_repository = UsageRepository(database_path)
-        self.clock_monitor = clock_monitor or ClockMonitor(database_path, report_timezone=timezone(timedelta(minutes=config.report_timezone_offset_minutes)))
+        self.clock_monitor = clock_monitor or config.clock_monitor()
         self.events = EventQueue(database_path, self.store.load().device_id or '__unenrolled__')
         self.on_event = on_command_event or (lambda event: LOGGER.info('Agent event: %s', event))
-        self.enforcer = WorkstationEnforcer(on_locked=lambda: self.activity('locked'),
+        self.enforcer = WorkstationEnforcer(lock=self.host.lock, on_locked=lambda: self.activity('locked'),
                                            relock_delay_sec=config.relock_delay_sec, state_key=database_path)
         self.remote_lock = RemoteLockRepository(database_path)
         self.command_handler = CommandHandler(
@@ -292,6 +330,7 @@ class AgentClient:
             device_id=payload["device_id"],
             access_token=payload["access_token"],
             refresh_token=payload["refresh_token"],
+            server_url=self.config.server_url,  # The Service restarts with the paired server.
         )
         self.store.save(state)
         self.events.owner = state.device_id
@@ -359,8 +398,8 @@ class AgentClient:
         return ScreenTimeCounter(
             repository=self.usage_repository,
             policy_provider=lambda: self.policy_manager.current,
-            active_probe=is_user_active,
-            unlocked_probe=is_session_unlocked,
+            active_probe=self.host.active,
+            unlocked_probe=self.host.unlocked,
             locker=lambda: False,
             enforcer=self.enforcer,
             now=self.clock_monitor.trusted_now,
@@ -437,50 +476,42 @@ def build_parser() -> argparse.ArgumentParser:
     enroll = commands.add_parser("enroll", help="pair this device")
     enroll.add_argument("code")
     commands.add_parser("heartbeat", help="send one heartbeat")
-    commands.add_parser("run", help="send heartbeats continuously")
+    commands.add_parser("run", help="run protection in this console (same runtime as the Service)")
     commands.add_parser("status", help="show safe local status")
     return result
 
 
-def run_forever(client: AgentClient, interval: int) -> None:
-    from service.content_runtime import ContentRuntime
-    from service.runtime_lock import RuntimeLock
-    lease = RuntimeLock(client.events.path)
-    stopped = threading.Event()
+def run_forever(config: AgentConfig) -> int:
+    """Console host for the same runtime the Windows Service uses (development, Linux, debugging)."""
+    from service.runtime import build_console_runtime
+    runtime = build_console_runtime(config)
 
     def stop(_signum: int, _frame: object) -> None:
-        stopped.set()
+        runtime.request_stop()
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
-    counter = client.screen_time_counter()
-    websocket = client.websocket_worker()
-    content = ContentRuntime(client, client.on_event)
-    content.start()
-    def heartbeat_loop():
-        while not stopped.is_set():
-            try:
-                client.heartbeat()
-            except Exception:
-                LOGGER.warning('Heartbeat unavailable; cached protection remains active')
-            stopped.wait(interval)
-    heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True, name='openguard-heartbeat')
-    heartbeat_thread.start()
-    LOGGER.info("Agent started; heartbeat interval=%s seconds", interval)
-    while not stopped.is_set():
-        try:
-            if client.clock_monitor.ready:
-                websocket.start()
-            result = counter.tick()
-            if result.should_lock:
-                LOGGER.warning("Workstation lock requested: %s", result.reason)
-        except (OSError, sqlite3.Error) as exc:
-            LOGGER.error("Screen-time tick failed: %s", exc)
-        stopped.wait(min(client.config.usage_tick_sec, 5.0))
-    websocket.stop()
-    content.stop()
-    heartbeat_thread.join(timeout=client.config.request_timeout_sec * 3 + 1)
-    lease.close()
+    try:
+        runtime.start()
+    except (RuntimeError, OSError) as exc:
+        LOGGER.error("%s", exc)
+        return 1
+    LOGGER.info("Agent started; heartbeat interval=%s seconds, IPC %s", config.heartbeat_interval_sec, runtime.address)
+    try:
+        runtime.wait()
+    finally:
+        runtime.stop()
+    return 1 if runtime.fatal else 0
+
+
+def enroll_via_service(config: AgentConfig, code: str) -> dict | None:
+    """A running Service owns the database, so pairing goes through it; None if none is running."""
+    from service.ipc import IPCClient, ServiceUnavailableError, default_address
+    try:
+        return IPCClient(default_address(config.state_path), timeout=60).call(
+            "enroll", code=code, server_url=config.server_url)
+    except ServiceUnavailableError:
+        return None
 
 
 def main() -> int:
@@ -499,15 +530,28 @@ def main() -> int:
         safe["enrolled"] = state.enrolled
         print(json.dumps(safe, indent=2))
         return 0
+    if args.command == "run":
+        return run_forever(config)
+    if args.command == "enroll":
+        from service.ipc import IPCError
+        try:
+            reply = enroll_via_service(config, args.code)
+        except (IPCError, PermissionError) as exc:
+            LOGGER.error("%s", exc)
+            return 1
+        if reply is not None:
+            if not reply.get("ok"):
+                LOGGER.error("%s", reply.get("message"))
+                return 1
+            print(f"Enrolled successfully as device {reply['device_id']}")
+            return 0
     client = AgentClient(config, store)
     try:
         if args.command == "enroll":
             state = client.enroll(args.code)
             print(f"Enrolled successfully as device {state.device_id}")
-        elif args.command == "heartbeat":
-            print(json.dumps(client.heartbeat(), indent=2))
         else:
-            run_forever(client, config.heartbeat_interval_sec)
+            print(json.dumps(client.heartbeat(), indent=2))
     except (ValueError, AgentNotEnrolledError, httpx.HTTPError) as exc:
         LOGGER.error("%s", exc)
         return 1
