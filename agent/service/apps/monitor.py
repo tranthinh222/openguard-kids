@@ -28,13 +28,23 @@ def session_id(pid):
     return value.value
 
 
-def processes():
+# Session-scoped accounts that own OS processes inside the child's session.
+SYSTEM_ACCOUNTS = ('nt authority\\', 'font driver host\\', 'window manager\\')
+
+
+def processes(target_session=None):
+    """This user's processes; a LocalSystem service passes the child's console session instead."""
     current = psutil.Process()
-    username, session = current.username(), session_id(current.pid)
+    username = None if target_session is not None else current.username()
+    session = target_session if target_session is not None else session_id(current.pid)
     for item in psutil.process_iter(['pid', 'create_time', 'name', 'exe', 'username']):
         try:
             info = item.info
-            if info['username'] != username or session_id(info['pid']) != session or info['pid'] == os.getpid():
+            if username is not None and info['username'] != username:
+                continue
+            if username is None and (not info['username'] or info['username'].lower().startswith(SYSTEM_ACCOUNTS)):
+                continue
+            if session_id(info['pid']) != session or info['pid'] == os.getpid():
                 continue
             name = process_name(info['name'])
             if name not in PROTECTED and info['exe'] and info['create_time'] is not None:
