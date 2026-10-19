@@ -1,4 +1,6 @@
-"""Bounded UDP/TCP DNS service, bound only to IPv4 loopback."""
+"""Bounded UDP/TCP DNS service, bound only to loopback (127.0.0.1 and, if available, ::1)."""
+import logging
+import socket
 import socketserver
 import errno
 import struct
@@ -15,6 +17,21 @@ from service.content_rules import domain
 from .safesearch import rewrite
 
 _extract = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None, include_psl_private_domains=True)
+LOGGER = logging.getLogger('openguard-agent.dns')
+
+# Answered locally so the runtime can probe its own proxy without upstream traffic or events.
+HEALTH_NAME = 'ogk-health.invalid'
+# NXDOMAIN here tells Firefox to keep DoH off by default (Mozilla's canary domain).
+DOH_CANARY = 'use-application-dns.net'
+# Public DNS-over-HTTPS endpoints: a browser that cannot resolve them falls back to system DNS.
+DOH_HOSTS = (
+    'dns.google', 'dns.google.com', 'cloudflare-dns.com', 'mozilla.cloudflare-dns.com',
+    'chrome.cloudflare-dns.com', 'one.one.one.one', '1dot1dot1dot1.cloudflare-dns.com',
+    'dns.quad9.net', 'dns9.quad9.net', 'dns10.quad9.net', 'dns11.quad9.net', 'doh.opendns.com',
+    'doh.familyshield.opendns.com', 'dns.nextdns.io', 'doh.cleanbrowsing.org', 'dns.adguard.com',
+    'dns.adguard-dns.com', 'family.adguard-dns.com', 'doh.dns.sb', 'dns.alidns.com', 'doh.pub',
+    'dns.controld.com', 'freedns.controld.com', 'doh.mullvad.net', 'dns.mullvad.net',
+)
 
 
 def event_domain(host):
@@ -44,9 +61,17 @@ class DNSProcessor:
                 host = domain(query.question[0].name.to_text())
             except (ValueError, UnicodeError):
                 host = None
+            if host in {HEALTH_NAME, DOH_CANARY}:
+                # Health probe answers NOERROR; the canary is a browser signal, not child activity.
+                if host == DOH_CANARY:
+                    response.set_rcode(dns.rcode.NXDOMAIN)
+                return self._wire(response, query, tcp)
             try:
                 policy = self.policy()
-                action, reason = self.matcher.decide(host, policy) if host else ('allow', 'local')
+                if host and any(host == item or host.endswith('.' + item) for item in DOH_HOSTS):
+                    action, reason = 'block', 'doh_endpoint'
+                else:
+                    action, reason = self.matcher.decide(host, policy) if host else ('allow', 'local')
                 if host:
                     subject = event_domain(host)
                     kind = 'blocked_domain' if action == 'block' else 'domain_query'
@@ -71,6 +96,10 @@ class DNSProcessor:
                 # Fail closed on upstream/policy/queue failure; do not log raw query labels.
                 response = dns.message.make_response(query)
                 response.set_rcode(dns.rcode.SERVFAIL)
+        return self._wire(response, query, tcp)
+
+    @staticmethod
+    def _wire(response, query, tcp):
         if tcp:
             return response.to_wire(max_size=65535)
         return response.to_wire(max_size=max(512, min(query.payload or 512, 1232)), prefer_truncation=True)
@@ -103,6 +132,14 @@ class UDPServer(BoundedThreads, socketserver.UDPServer):
 
 class TCPServer(BoundedThreads, socketserver.TCPServer):
     pass
+
+
+class UDPServer6(UDPServer):
+    address_family = socket.AF_INET6
+
+
+class TCPServer6(TCPServer):
+    address_family = socket.AF_INET6
 
 
 class UDPHandler(socketserver.BaseRequestHandler):
@@ -150,8 +187,9 @@ class DNSBindError(OSError):
 
 
 class DNSProxy:
-    def __init__(self, processor, port=53):
+    def __init__(self, processor, port=53, ipv6=True):
         self.processor, self.port, self.servers, self.threads = processor, port, [], []
+        self.ipv6, self.ipv6_bound = ipv6, False
 
     def start(self):
         protocol = 'UDP'
@@ -161,6 +199,18 @@ class DNSProxy:
             self.port = udp.server_address[1]
             protocol = 'TCP'
             self.servers.append(TCPServer(('127.0.0.1', self.port), TCPHandler))
+            if self.ipv6:
+                # Without a ::1 listener, an adapter's IPv6 DNS servers would bypass the filter.
+                v6 = []
+                try:
+                    v6.append(UDPServer6(('::1', self.port), UDPHandler))
+                    v6.append(TCPServer6(('::1', self.port), TCPHandler))
+                    self.servers.extend(v6)
+                    self.ipv6_bound = True
+                except OSError as exc:
+                    for server in v6:
+                        server.server_close()
+                    LOGGER.warning('DNS proxy IPv6 loopback unavailable: %s', exc)
             for server in self.servers:
                 server.processor, server.slots = self.processor, threading.BoundedSemaphore(32)
                 thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .1}, daemon=True)
@@ -180,4 +230,4 @@ class DNSProxy:
             server.server_close()
         for thread in self.threads:
             thread.join(timeout=2)
-        self.servers, self.threads = [], []
+        self.servers, self.threads, self.ipv6_bound = [], [], False
