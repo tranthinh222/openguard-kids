@@ -1,5 +1,19 @@
 # OpenGuard Kids Agent
 
+## Week 04 — Windows Service
+
+Tray = UI, Service = protection. Cài đặt, thiết kế A1–A7 và kịch bản kiểm thử:
+[WEEK04.md](WEEK04.md).
+
+```powershell
+# PowerShell Run as administrator, tại thư mục gốc dự án
+.\.venv\Scripts\python.exe agent\openguard_service.py install
+```
+
+Không có Windows (dev): chạy runtime bằng `python agent/openguard_agent.py run`
+rồi mở Tray `python agent/agent_gui.py`. Tray không tự chạy bảo vệ nữa; đóng hay
+kill Tray không dừng bảo vệ, và menu Tray không còn mục “Thoát agent”.
+
 ## Week 03
 
 Hướng dẫn cấu hình, test app/DNS/offline và các giới hạn triển khai: [WEEK03.md](WEEK03.md).
@@ -10,8 +24,8 @@ Hướng dẫn cấu hình, test app/DNS/offline và các giới hạn triển k
 ```
 
 Agent nhận policy ngay qua WebSocket (xác minh HMAC), heartbeat là fallback.
-GUI có biểu tượng system tray; đóng cửa sổ sẽ thu xuống tray, chọn **Thoát agent**
-để dừng. **Hôm nay / quyền riêng tư** hiển thị báo cáo, policy đang áp dụng,
+GUI có biểu tượng system tray; đóng cửa sổ sẽ thu xuống tray. Từ tuần 4 việc
+dừng bảo vệ là dừng service/runtime, không phải thoát Tray. **Hôm nay / quyền riêng tư** hiển thị báo cáo, policy đang áp dụng,
 lịch sử thay đổi và event chưa đồng bộ. Nút tạm dừng đồng bộ chỉ dừng heartbeat,
 không dừng bảo vệ app/DNS, WebSocket hay upload event.
 
@@ -68,6 +82,6 @@ cài thêm gói `python3-tk` của hệ điều hành.
 ## Chạy bằng dòng lệnh
 
 ```bash
-.venv/bin/python agent/openguard_agent.py enroll ABCD1234
-.venv/bin/python agent/openguard_agent.py run
+.venv/bin/python agent/openguard_agent.py enroll ABCD1234   # qua IPC nếu runtime/service đang chạy
+.venv/bin/python agent/openguard_agent.py run               # runtime giống service, trong console
 ```
