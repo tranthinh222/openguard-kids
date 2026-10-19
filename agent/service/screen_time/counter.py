@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -50,6 +50,11 @@ class UsageRepository:
                     date TEXT NOT NULL, policy_version INTEGER NOT NULL,
                     warning_minute INTEGER NOT NULL, sent_at TEXT NOT NULL,
                     PRIMARY KEY(date, policy_version, warning_minute)
+                )
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS grace_state (
+                    date TEXT PRIMARY KEY, deadline TEXT NOT NULL, started_at TEXT NOT NULL
                 )
             """)
 
@@ -108,6 +113,29 @@ class UsageRepository:
             )
 
 
+    def grace_deadline(self, day: date) -> datetime | None:
+        with self._connect() as db:
+            row = db.execute("SELECT deadline FROM grace_state WHERE date=?", (day.isoformat(),)).fetchone()
+        return None if row is None else datetime.fromisoformat(row[0])
+
+    def start_grace(self, day: date, started: datetime, seconds: int) -> tuple[datetime, bool]:
+        """Record the first grace of an exhaustion; a restart reuses it instead of granting another.
+
+        Returns the deadline and whether this call created it.
+        """
+        with self._mutex, self._connect() as db:
+            created = db.execute("INSERT OR IGNORE INTO grace_state VALUES (?, ?, ?)",
+                                 (day.isoformat(), (started + timedelta(seconds=seconds)).isoformat(),
+                                  started.isoformat())).rowcount == 1
+            row = db.execute("SELECT deadline FROM grace_state WHERE date=?", (day.isoformat(),)).fetchone()
+        return datetime.fromisoformat(row[0]), created
+
+    def clear_grace(self, day: date) -> None:
+        """Quota is available again (bonus or new day): the next exhaustion earns a new grace."""
+        with self._mutex, self._connect() as db:
+            db.execute("DELETE FROM grace_state WHERE date<=?", (day.isoformat(),))
+
+
 class ScreenTimeCounter:
     def __init__(
         self,
@@ -143,6 +171,7 @@ class ScreenTimeCounter:
         self._clock_sync_deadline = self._previous + max(0.0, clock_sync_timeout_sec)
         self._lock_pending = False
         self._grace_deadline: float | None = None
+        self._grace_cleared: date | None = None
         self._relock_seconds = 0
 
     def tick(self) -> TickResult:
@@ -198,7 +227,7 @@ class ScreenTimeCounter:
             self._enforce(EnforcementReason.SCHEDULE_DISALLOWED)
             return TickResult(0, usage.used_seconds, available, True, "outside_schedule")
         if available <= 0:
-            return self._quota_exhausted(policy, usage.used_seconds, current_mono)
+            return self._quota_exhausted(policy, usage.used_seconds, current_mono, moment)
         if not self.active_probe(policy.screen_time.idle_timeout_sec):
             return TickResult(0, usage.used_seconds, available, False, "idle")
 
@@ -207,9 +236,12 @@ class ScreenTimeCounter:
         remaining = max(0.0, quota - usage.used_seconds)
         events = self._warning_events(policy, moment.date(), available, remaining)
         if remaining <= 0:
-            exhausted = self._quota_exhausted(policy, usage.used_seconds, current_mono)
+            exhausted = self._quota_exhausted(policy, usage.used_seconds, current_mono, moment)
             return TickResult(counted, usage.used_seconds, 0, exhausted.should_lock, exhausted.reason, events + exhausted.events)
         self._grace_deadline = None
+        if self._grace_cleared != moment.date():
+            self.repository.clear_grace(moment.date())
+            self._grace_cleared = moment.date()
         return TickResult(counted, usage.used_seconds, remaining, False, "counted", events)
 
     def _warning_events(self, policy: Policy, day: date, before: float, after: float) -> tuple[dict, ...]:
@@ -223,14 +255,22 @@ class ScreenTimeCounter:
                 events.append(event)
         return tuple(events)
 
-    def _quota_exhausted(self, policy: Policy, used: float, current_mono: float) -> TickResult:
+    def _quota_exhausted(self, policy: Policy, used: float, current_mono: float, moment: datetime) -> TickResult:
         grace = policy.screen_time.grace_period_sec
         if grace > 0:
             if self._grace_deadline is None:
-                self._grace_deadline = current_mono + grace
-                event = {"type": "GRACE_STARTED", "seconds_remaining": grace}
-                self.on_event(event)
-                return TickResult(0, used, 0, False, "grace_period", (event,))
+                # The deadline lives in SQLite (trusted time), so restarting the Agent mid-grace
+                # resumes the remaining seconds instead of granting a fresh grace period.
+                self._grace_cleared = None
+                deadline, created = self.repository.start_grace(moment.date(), moment, grace)
+                left = min(grace, (deadline - moment).total_seconds())
+                self._grace_deadline = current_mono + max(0.0, left)
+                if left > 0:
+                    event = {"type": "GRACE_STARTED", "seconds_remaining": int(left + 0.999)}
+                    if not created:
+                        event["resumed"] = True
+                    self.on_event(event)
+                    return TickResult(0, used, 0, False, "grace_period", (event,))
             remaining = max(0, int(self._grace_deadline - current_mono + 0.999))
             if current_mono < self._grace_deadline:
                 return TickResult(0, used, 0, False, "grace_period", ({"type": "GRACE_TICK", "seconds_remaining": remaining},))
