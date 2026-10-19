@@ -1,5 +1,7 @@
-"""Tkinter interface for pairing and running OpenGuard Kids Agent.
+"""Tkinter tray UI for OpenGuard Kids.
 
+Tray = UI, Service = protection: this window only shows what the protection service reports
+over local IPC and forwards the child's requests, so closing or killing it stops nothing.
 The window has two states, following the pairing flow of family-safety apps:
 an "enter the code" screen before pairing and a simple "this device is
 protected" status screen afterwards. Colours match the parent dashboard.
@@ -7,8 +9,8 @@ protected" status screen afterwards. Colours match the parent dashboard.
 
 from __future__ import annotations
 
+import argparse
 import queue
-import threading
 import tkinter as tk
 from datetime import datetime
 import tkinter.font as tkfont
@@ -16,19 +18,18 @@ from pathlib import Path
 from typing import Callable
 
 from gui_controller import (
-    AgentController,
-    HeartbeatWorker,
-    ProtectionWorker,
     describe_error,
     format_remaining,
     format_sync_time,
-    is_network_error,
-    needs_reenroll,
     normalize_enrollment_code,
     normalize_server_url,
     policy_summary,
 )
-from openguard_agent import AGENT_VERSION, device_name
+from openguard_agent import AGENT_VERSION, AgentConfig, default_state_path
+from service.ipc import IPCClient, IPCError, ServiceUnavailableError, default_address
+from service.policy.models import Policy, PolicyValidationError
+from service.screen_time.counter import TickResult
+from tray_client import ServiceLink
 
 LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo.png"
 CODE_LENGTH = 8
@@ -201,20 +202,23 @@ class StatusBadge(tk.Canvas):
 
 
 class AgentWindow:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, background: bool = False):
         global SCALE
         SCALE = detect_scale(root)
         self.root = root
-        self.controller = AgentController()
-        self.controller.on_command_event = self._queue_protection_event
+        try:
+            config = AgentConfig.from_env()
+        except ValueError:
+            config = AgentConfig("http://127.0.0.1:8000", default_state_path())
+        # Tray = UI only: protection, tokens and the database belong to the service.
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
-        self.worker = HeartbeatWorker(self.controller, self._queue_heartbeat)
-        self.protection = ProtectionWorker(self.controller, self._queue_protection_event)
-        self.server_var = tk.StringVar(value=self.controller.config.server_url)
+        self.link = ServiceLink(IPCClient(default_address(config.state_path)),
+                                lambda name, payload: self.events.put((name, payload)))
+        self.service: dict | None = None  # latest `status` reply
+        self.service_error = ""
+        self.view: str | None = None
+        self.server_var = tk.StringVar(value=config.server_url)
         self.code_var = tk.StringVar()
-        self.connection = "checking"  # checking | ok | offline | rejected | error
-        self.connection_error = ""
-        self.policy_version: int | None = None
         self.checking = False
         self._banner_job: str | None = None
         self._init_fonts()
@@ -222,7 +226,13 @@ class AgentWindow:
         from tray_ui import TrayUI
         self.tray = TrayUI(self.events)
         self.tray.start()
-        self._show_initial_view()
+        self._show_status_view()
+        self._refresh_status()
+        self.link.start()
+        if background:
+            # Started by the service at sign-in or after the tray was closed: icon, no window.
+            root.withdraw()
+            root.after(1500, lambda: self.tray.notify("OpenGuard Kids đang bảo vệ máy này. Mở biểu tượng để xem chi tiết."))
         root.after(100, self._process_events)
         root.after(1000, self._refresh_remaining)
         root.protocol("WM_DELETE_WINDOW", self._close)
@@ -494,22 +504,8 @@ class AgentWindow:
 
     # ------------------------------------------------------------ view states
 
-    def _show_initial_view(self) -> None:
-        try:
-            enrolled = self.controller.state().enrolled
-        except RuntimeError as exc:
-            self._show_pair_view()
-            self._show_code_error(describe_error(exc))
-            return
-        if enrolled:
-            self._show_status_view()
-            self.worker.start()
-            self.protection.start()
-            self._refresh_status()
-        else:
-            self._show_pair_view()
-
     def _show_pair_view(self, allow_back: bool = False) -> None:
+        self.view = "pair"
         self.status_view.pack_forget()
         self.pair_view.pack(fill="both", expand=True)
         self.content_canvas.yview_moveto(0)
@@ -523,46 +519,84 @@ class AgentWindow:
         self.code_entry.focus_set()
 
     def _show_status_view(self) -> None:
+        self.view = "status"
         self.pair_view.pack_forget()
         self.status_view.pack(fill="both", expand=True)
         self.content_canvas.yview_moveto(0)
         self.root.focus_set()
         self._fit_window()
 
-    def _refresh_status(self) -> None:
+    def _policy(self) -> Policy | None:
+        envelope = (self.service or {}).get("policy")
         try:
-            state = self.controller.state()
-        except RuntimeError as exc:
-            self.connection, self.connection_error = "error", describe_error(exc)
-            state = None
-        running = self.worker.running
+            return Policy.from_envelope(envelope) if envelope else None
+        except PolicyValidationError:
+            return None
+
+    def _trusted_now(self) -> datetime | None:
+        value = ((self.service or {}).get("clock") or {}).get("trusted_now")
+        return datetime.fromisoformat(value) if value else None
+
+    def _refresh_status(self) -> None:
+        status = self.service
+        if status is None:
+            look = (RED, RED_SOFT, "!", "Dịch vụ bảo vệ chưa chạy", self.service_error or
+                    "Đang kết nối tới dịch vụ OpenGuard trên máy này…") if self.service_error else \
+                   (GREY, GREY_SOFT, "…", "Đang kết nối tới dịch vụ", "Vui lòng chờ trong giây lát.")
+            self._set_row(self.row_account, "—", GREY)
+            self._set_row(self.row_service, "Không phản hồi" if self.service_error else "Đang kiểm tra",
+                          RED if self.service_error else GREY)
+            self._set_row(self.row_server, "Không rõ", GREY)
+            self._apply_look(look)
+            self.check_button.set_enabled(False, "Kiểm tra kết nối")
+            return
+        paused, connection = status["sync_paused"], status["connection"]
+        protecting = status["protection_running"]
         self._set_row(self.row_account, "Đã ghép", GREEN)
-        self._set_row(self.row_service, "Đang chạy" if running else "Tạm dừng", GREEN if running else GREY)
-        if not running:
+        self._set_row(self.row_service, "Đang bảo vệ" if protecting else "Đang khởi động lại",
+                      GREEN if protecting else AMBER)
+        if paused:
             look = (GREY, GREY_SOFT, "‖", "Đồng bộ đang tạm dừng",
-                    "Phụ huynh sẽ thấy máy này ngoại tuyến cho tới khi bạn tiếp tục đồng bộ.")
+                    "Bảo vệ vẫn chạy. Phụ huynh sẽ thấy máy này ngoại tuyến cho tới khi tiếp tục đồng bộ.")
             self._set_row(self.row_server, "Không kiểm tra", GREY)
-        elif self.connection == "ok":
+        elif connection == "ok":
             look = (GREEN, GREEN_SOFT, "✓", "Thiết bị đang được bảo vệ",
                     "OpenGuard đang chạy và đồng bộ với trang phụ huynh.")
             self._set_row(self.row_server, "Đã kết nối", GREEN)
-            clock_status = self.controller.clock_monitor.status
-            if clock_status is not None and clock_status.drifted:
+            if status["clock"]["drifted"]:
                 look = (AMBER, AMBER_SOFT, "!", "Đồng hồ máy đang sai",
                         "Đã kết nối. OpenGuard đang dùng giờ máy chủ để áp dụng lịch và hạn mức.")
-        elif self.connection == "offline":
+        elif connection == "offline":
             look = (AMBER, AMBER_SOFT, "!", "Đang mất kết nối",
-                    f"Agent vẫn chạy và sẽ tự thử lại mỗi {self.controller.config.heartbeat_interval_sec} giây.")
+                    "Bảo vệ vẫn chạy với chính sách đã lưu và sẽ tự đồng bộ lại khi có mạng.")
             self._set_row(self.row_server, "Mất kết nối", AMBER)
-        elif self.connection == "rejected":
-            look = (RED, RED_SOFT, "!", "Cần ghép lại thiết bị", self.connection_error)
+        elif connection == "rejected":
+            look = (RED, RED_SOFT, "!", "Cần ghép lại thiết bị", status["connection_error"])
             self._set_row(self.row_server, "Bị từ chối", RED)
-        elif self.connection == "error":
-            look = (RED, RED_SOFT, "!", "Đồng bộ gặp lỗi", self.connection_error)
+        elif connection == "error":
+            look = (RED, RED_SOFT, "!", "Đồng bộ gặp lỗi", status["connection_error"])
             self._set_row(self.row_server, "Lỗi", RED)
         else:
             look = (GREY, GREY_SOFT, "…", "Đang kết nối tới server", "Vui lòng chờ trong giây lát.")
             self._set_row(self.row_server, "Đang kiểm tra", GREY)
+        self._apply_look(look)
+
+        trusted_now = self._trusted_now()
+        self._set_row(self.row_sync, format_sync_time(status["last_heartbeat_at"], trusted_now))
+        self._set_row(self.row_policy, f"phiên bản {status['policy_version']}")
+        self.detail_id.set(status["device_id"] or "—")
+        summary = policy_summary(self._policy(), trusted_now.weekday() if trusted_now else 0)
+        if trusted_now is None:
+            summary["schedule"] = "Đang chờ xác minh giờ máy chủ"
+        for key, text in summary.items():
+            self.policy_rows[key].set(text)
+        self.detail_name.set(status["device_name"])
+        self.detail_server.set(status["server_url"])
+        self.service_button.configure(text="Tiếp tục đồng bộ" if paused else "Tạm dừng đồng bộ")
+        self.check_button.set_enabled(not paused and not self.checking,
+                                      "Đang kiểm tra..." if self.checking else "Kiểm tra kết nối")
+
+    def _apply_look(self, look) -> None:
         color, soft, glyph, title, subtitle = look
         self.badge.show(color, soft, glyph)
         self.status_title.configure(text=title)
@@ -570,26 +604,11 @@ class AgentWindow:
         self._set_pill({GREEN: "Đang bảo vệ", AMBER: "Cần chú ý", RED: "Cần xử lý"}.get(color, "Tạm dừng"),
                        color if color != GREY else MUTED, soft)
 
-        trusted_now = self.controller.clock_monitor.trusted_now() if self.controller.clock_monitor.ready else None
-        if state is not None:
-            self._set_row(self.row_sync, format_sync_time(state.last_heartbeat_at, trusted_now))
-            version = self.policy_version if self.policy_version is not None else state.policy_version
-            self._set_row(self.row_policy, f"phiên bản {version}")
-            self.detail_id.set(state.device_id or "—")
-        summary = policy_summary(self.controller.current_policy(), trusted_now.weekday() if trusted_now else 0)
-        if trusted_now is None:
-            summary["schedule"] = "Đang chờ xác minh giờ máy chủ"
-        for key, text in summary.items():
-            self.policy_rows[key].set(text)
-        self.detail_name.set(device_name())
-        self.detail_server.set(self.controller.config.server_url)
-        self.service_button.configure(text="Tạm dừng đồng bộ" if running else "Tiếp tục đồng bộ")
-        self.check_button.set_enabled(running and not self.checking,
-                                      "Đang kiểm tra..." if self.checking else "Kiểm tra kết nối")
-
     def _refresh_remaining(self) -> None:
-        """Keep the countdown live; the protection thread publishes one result per tick."""
-        self._set_row(self.row_remaining, format_remaining(self.protection.latest if self.protection.running else None))
+        """Keep the countdown live from the service's latest enforcement tick."""
+        tick = (self.service or {}).get("tick")
+        result = TickResult(**{**tick, "events": tuple(tick.get("events", ()))}) if tick else None
+        self._set_row(self.row_remaining, format_remaining(result))
         self.root.after(1000, self._refresh_remaining)
 
     def _show_banner(self, text: str, kind: str = "success") -> None:
@@ -654,88 +673,50 @@ class AgentWindow:
             self.server_entry.focus_set()
             return
         self._set_enrolling(True)
-
-        def task() -> None:
-            try:
-                for worker in (self.worker, self.protection):
-                    if worker._thread:
-                        worker._thread.join(timeout=self.controller.config.request_timeout_sec * 4 + 15)
-                        if worker._thread.is_alive():
-                            raise RuntimeError('Agent is still stopping; wait before pairing again')
-                self.events.put(("enrolled", self.controller.enroll(code, server_url)))
-            except Exception as exc:
-                self.events.put(("enroll_error", exc))
-
-        threading.Thread(target=task, name="openguard-enroll", daemon=True).start()
+        self.link.call_async("enrolled", "enroll", code=code, server_url=server_url)
 
     def _start_repair(self) -> None:
-        self.worker.stop()
-        self.protection.stop()
         self.code_var.set("")
         self._show_pair_view(allow_back=True)
 
     def _back_to_status(self) -> None:
-        if self.protection.running and self.protection._stop.is_set():
-            self.root.after(100, self._back_to_status)
-            return
         self._show_status_view()
-        self.worker.start()
-        self.protection.start()
         self._refresh_status()
 
-    # ------------------------------------------------------------ heartbeat
+    # ------------------------------------------------------------ actions
 
     def _toggle_service(self) -> None:
-        if self.worker.running:
-            self.worker.stop()
-        else:
-            self.connection = "checking"
-            self.worker.start()
-            self.protection.start()
-        self._refresh_status()
+        if self.service is not None:
+            self.link.call_async("sync_paused", "set_sync_paused", paused=not self.service["sync_paused"])
 
     def _check_connection(self) -> None:
         if self.checking:
             return
         self.checking = True
         self._refresh_status()
-
-        def task() -> None:
-            try:
-                self.events.put(("checked", (self.controller.heartbeat(), None)))
-            except Exception as exc:
-                self.events.put(("checked", (None, exc)))
-
-        threading.Thread(target=task, name="openguard-check", daemon=True).start()
+        self.link.call_async("checked", "heartbeat_now")
 
     def _request_extra_time(self) -> None:
         self.extra_time_button.set_enabled(False, "Đang gửi yêu cầu...")
+        self.link.call_async("extra_time", "request_extra_time", minutes=15)
 
-        def task() -> None:
-            try:
-                self.events.put(("extra_time", (self.controller.request_extra_time(15), None)))
-            except Exception as exc:
-                self.events.put(("extra_time", (None, exc)))
+    def _action_error(self, error: Exception) -> str:
+        if isinstance(error, ServiceUnavailableError):
+            return "Không liên lạc được dịch vụ bảo vệ trên máy này. Hãy thử lại sau ít giây."
+        if isinstance(error, IPCError):
+            return str(error)
+        return describe_error(error)
 
-        threading.Thread(target=task, name="openguard-extra-time", daemon=True).start()
-
-    def _queue_heartbeat(self, result: dict | None, error: Exception | None) -> None:
-        self.events.put(("heartbeat", (result, error)))
-
-    def _queue_protection_event(self, event: dict) -> None:
-        self.events.put(("protection", event))
-
-    def _apply_heartbeat(self, result: dict | None, error: Exception | None) -> None:
-        if error is None:
-            self.connection, self.connection_error = "ok", ""
-            if result is not None and "policy_version" in result:
-                self.policy_version = result["policy_version"]
-        elif is_network_error(error):
-            self.connection, self.connection_error = "offline", describe_error(error)
-        elif needs_reenroll(error):
-            self.connection, self.connection_error = "rejected", describe_error(error)
-        else:
-            self.connection, self.connection_error = "error", describe_error(error)
+    def _on_service_status(self, status: dict) -> None:
+        first = self.service is None
+        self.service, self.service_error = status, ""
+        if not status["enrolled"]:
+            if self.view != "pair":
+                self._show_pair_view()
+        elif self.view is None or (self.view == "pair" and first):
+            self._show_status_view()
+        if self.view == "status":
+            self._refresh_status()
 
     def _process_events(self) -> None:
         try:
@@ -747,57 +728,59 @@ class AgentWindow:
                 elif event == 'tray_today':
                     self.root.deiconify()
                     self._show_transparency()
-                elif event == 'tray_exit':
-                    self._quit()
-                    return
+                elif event == 'service_status':
+                    self._on_service_status(payload)
+                elif event == 'service_down':
+                    self.service, self.service_error = None, self._action_error(payload)
+                    if self.view == "status":
+                        self._refresh_status()
                 elif event == 'transparency':
+                    result, error = payload
+                    if error is not None or not result.get('ok'):
+                        self._show_banner(self._action_error(error) if error else result['message'], 'error')
+                        continue
+                    from types import SimpleNamespace
                     from transparency_ui import show
-                    usage = None
-                    if self.controller.clock_monitor.ready:
-                        from service.screen_time import UsageRepository
-                        path = self.controller.config.database_path or self.controller.config.state_path.with_name('agent.db')
-                        usage = UsageRepository(path).get(self.controller.clock_monitor.trusted_now().date())
-                    show(self.root, payload, self.controller.current_policy(), usage)
-                elif event == 'transparency_error':
-                    self._show_banner(describe_error(payload), 'error')
+                    usage = SimpleNamespace(used_seconds=result['usage_seconds']) if result['usage_seconds'] is not None else None
+                    show(self.root, result['result'], self._policy(), usage)
                 elif event == "enrolled":
+                    result, error = payload
                     self._set_enrolling(False)
+                    if error is not None or not result.get("ok"):
+                        message = self._action_error(error) if error else result["message"]
+                        self._show_code_error(message, network=bool(result and result.get("network")))
+                        self.code_entry.focus_set()
+                        continue
                     self.stepper.set_step(3)
                     self.code_var.set("")
-                    self.connection, self.policy_version = "checking", None
                     self._show_status_view()
-                    self.worker.start()
-                    self.protection.start()
                     self._refresh_status()
                     self._show_banner("Ghép thiết bị thành công.")
-                elif event == "enroll_error":
-                    self._set_enrolling(False)
-                    self._show_code_error(describe_error(payload), network=is_network_error(payload))
-                    self.code_entry.focus_set()
-                elif event in {"heartbeat", "checked"}:
+                elif event == "sync_paused":
                     result, error = payload
-                    if event == "heartbeat" and not self.worker.running:
-                        continue
-                    self._apply_heartbeat(result, error)
-                    if event == "checked":
-                        self.checking = False
-                        if error is None:
-                            if self.controller.clock_monitor.status and self.controller.clock_monitor.status.drifted:
-                                self._show_banner("Đồng hồ máy đang sai. OpenGuard đang dùng giờ máy chủ.", "warning")
-                            else:
-                                self._show_banner("Kết nối ổn định. Đã đồng bộ với trang phụ huynh.")
+                    if error is not None:
+                        self._show_banner(self._action_error(error), "error")
+                elif event == "checked":
+                    result, error = payload
+                    self.checking = False
+                    if error is not None:
+                        self._show_banner(self._action_error(error), "error")
+                    elif result["ok"]:
+                        if result["drifted"]:
+                            self._show_banner("Đồng hồ máy đang sai. OpenGuard đang dùng giờ máy chủ.", "warning")
                         else:
-                            self._show_banner(self.connection_error,
-                                              "warning" if self.connection == "offline" else "error")
-                    if self.status_view.winfo_ismapped():
+                            self._show_banner("Kết nối ổn định. Đã đồng bộ với trang phụ huynh.")
+                    else:
+                        self._show_banner(result["message"], "warning" if result["connection"] == "offline" else "error")
+                    if self.view == "status":
                         self._refresh_status()
                 elif event == "extra_time":
-                    _result, error = payload
+                    result, error = payload
                     self.extra_time_button.set_enabled(True, "Xin thêm 15 phút")
-                    if error is None:
+                    if error is None and result["ok"]:
                         self._show_banner("Đã gửi yêu cầu thêm 15 phút. Đang chờ phụ huynh duyệt.")
                     else:
-                        self._show_banner(describe_error(error), "error")
+                        self._show_banner(self._action_error(error) if error else result["message"], "error")
                 elif event == "protection":
                     kind = payload.get("type")
                     if kind == 'RELOCK_COUNTDOWN':
@@ -823,8 +806,6 @@ class AgentWindow:
                         self._show_banner(payload['message'], 'error')
                         self.tray.notify(payload['message'])
                     elif kind == 'POLICY_UPDATED':
-                        self.policy_version = payload['version']
-                        self._refresh_status()
                         self._show_banner(f"Đã áp dụng policy v{payload['version']}.")
                     elif kind == "TIME_WARNING":
                         self._show_banner(f"Còn {payload['minutes_remaining']} phút sử dụng.", "warning")
@@ -845,44 +826,34 @@ class AgentWindow:
                             "warning",
                         )
                     elif kind == "PROTECTION_ERROR":
-                        self._show_banner(describe_error(payload["error"]), "error")
+                        self._show_banner(payload["error"], "error")
+                    elif kind == "PROTECTION_RESTARTED":
+                        self._show_banner("Dịch vụ đã tự khởi động lại phần bảo vệ sau một lỗi.", "warning")
+                    elif kind == "DNS_FAILSAFE":
+                        self._show_banner("Bộ lọc web tạm thời gặp lỗi; Internet vẫn dùng được. "
+                                          "OpenGuard sẽ tự bật lại bộ lọc.", "warning")
         except queue.Empty:
             pass
         self.root.after(100, self._process_events)
 
     def _close(self) -> None:
+        # Closing the window never stops protection; the icon stays while the service runs.
         if self.tray.visible:
             self.root.withdraw()
-            return
-        self._quit()
+        else:
+            self.link.stop()
+            self.root.destroy()
 
     def _show_transparency(self):
-        def task():
-            try:
-                self.events.put(('transparency', self.controller.transparency()))
-            except Exception as exc:
-                self.events.put(('transparency_error', exc))
-        threading.Thread(target=task, daemon=True).start()
-
-    def _quit(self):
-        self.worker.stop()
-        self.protection.stop()
-        self.tray.stop()
-        self.root.deiconify()
-        self.root.title('OpenGuard — đang dừng và lưu dữ liệu…')
-        self._finish_quit()
-
-    def _finish_quit(self):
-        # Keep Tk responsive while final app segments are persisted and sockets close.
-        if any(worker._thread and worker._thread.is_alive() for worker in (self.worker, self.protection)):
-            self.root.after(100, self._finish_quit)
-        else:
-            self.root.destroy()
+        self.link.call_async("transparency", "transparency")
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="OpenGuard Kids tray")
+    parser.add_argument("--background", action="store_true", help="start with only the tray icon")
+    args = parser.parse_args()
     root = tk.Tk()
-    AgentWindow(root)
+    AgentWindow(root, background=args.background)
     root.mainloop()
 
 

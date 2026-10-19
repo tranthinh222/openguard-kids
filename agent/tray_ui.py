@@ -14,8 +14,8 @@ class TrayUI:
             return lambda _icon, _item: events.put((name, None))
         self.icon = pystray.Icon('OpenGuardKids', icon, 'OpenGuard Kids — bảo vệ và minh bạch', menu=pystray.Menu(
             pystray.MenuItem('Mở OpenGuard', action('tray_open'), default=True),
-            pystray.MenuItem('Hôm nay / quyền riêng tư', action('tray_today')),
-            pystray.MenuItem('Thoát agent', action('tray_exit'))))
+            # No "exit": the icon stays visible while the service protects this computer (NT1).
+            pystray.MenuItem('Hôm nay / quyền riêng tư', action('tray_today'))))
         self.thread = threading.Thread(target=self.icon.run, daemon=True, name='openguard-tray')
 
     def start(self):

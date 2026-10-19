@@ -1,0 +1,14 @@
+flowchart TD
+    HB["Heartbeat trả về<br/>server_time"] --> Drift["Độ lệch =<br/>giờ máy - giờ server"]
+    Drift --> Over{"Lệch quá<br/>120 giây?"}
+    Over -- "Có" --> Event[("clock_events<br/>ghi nhận chỉnh đồng hồ")]
+    Over -- "Không" --> Anchor
+    Event --> Anchor["Neo: giờ server +<br/>mốc đồng hồ đơn điệu"]
+
+    Anchor --> Trusted["Giờ tin cậy =<br/>giờ server lúc neo + thời gian đơn điệu trôi qua"]
+    Trusted --> Day["Xác định ngày<br/>để tính quota"]
+    Trusted --> Slot["Xác định ô<br/>lịch tuần hiện tại"]
+
+    Mono["time.monotonic()"] --> Count["Đếm thời gian sử dụng"]
+    Tamper["Trẻ lùi đồng hồ Windows"] -. "không ảnh hưởng" .-> Count
+    Tamper -. "không ảnh hưởng" .-> Trusted

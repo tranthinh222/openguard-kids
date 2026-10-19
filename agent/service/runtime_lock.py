@@ -3,8 +3,8 @@ import os
 
 
 class RuntimeLock:
-    def __init__(self, database_path):
-        path = database_path.with_suffix('.runtime.lock')
+    def __init__(self, database_path, suffix='.runtime.lock'):
+        path = database_path.with_suffix(suffix)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.file = path.open('a+b')
         self.file.seek(0, 2)

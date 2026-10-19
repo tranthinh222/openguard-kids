@@ -1,0 +1,19 @@
+flowchart TD
+    Tick(["Mỗi giây: tick"]) --> Remote{"Phụ huynh<br/>đang khóa từ xa?"}
+    Remote -- "Có" --> Lock["Khóa máy"]
+    Remote -- "Không" --> HasPolicy{"Có chính sách?"}
+    HasPolicy -- "Không" --> Skip["Không đếm"]
+    HasPolicy -- "Có" --> Session{"Màn hình<br/>đang khóa?"}
+    Session -- "Có" --> Skip
+    Session -- "Không" --> Schedule{"Trong khung giờ<br/>lịch tuần 7x48?"}
+    Schedule -- "Không" --> Lock
+    Schedule -- "Có" --> Quota{"Còn quota<br/>(hạn mức + bonus)?"}
+    Quota -- "Không" --> Grace{"Hết 60 giây<br/>ân hạn?"}
+    Grace -- "Chưa" --> Wait["Báo ân hạn<br/>cho trẻ lưu bài"]
+    Grace -- "Rồi" --> Lock
+    Quota -- "Có" --> Idle{"Không thao tác<br/>quá 5 phút?"}
+    Idle -- "Có" --> Skip
+    Idle -- "Không" --> Count["Cộng thời gian theo<br/>đồng hồ đơn điệu"]
+    Count --> Save[("usage_daily")]
+    Count --> Warn{"Qua mốc<br/>10, 5, 1 phút?"}
+    Warn -- "Có" --> Banner["Cảnh báo một lần<br/>mỗi mốc mỗi ngày"]

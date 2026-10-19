@@ -26,3 +26,5 @@ dnspython>=2.8,<3
 pystray>=0.19.5,<0.20
 Pillow>=11,<13
 tldextract>=5.1,<6
+# Windows Service, named-pipe IPC and WTS session APIs (agent on Windows only)
+pywin32>=306; sys_platform == "win32"

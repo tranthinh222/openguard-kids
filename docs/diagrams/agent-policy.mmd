@@ -1,0 +1,20 @@
+sequenceDiagram
+    participant A as Agent
+    participant S as Server
+    participant DB as agent.db
+
+    A->>S: POST /agent/heartbeat (policy_version hiện có)
+    S-->>A: policy_version mới nhất, policy_update_available
+    opt Lệch phiên bản
+        A->>S: GET /agent/policy
+        S-->>A: id, version, payload, signature
+        A->>A: Kiểm tra schema (quota, 336 ô lịch tuần)
+        A->>A: HMAC-SHA256(version + payload) so với signature
+        alt Hợp lệ và version không thấp hơn bản đang dùng
+            A->>DB: Lưu và kích hoạt chính sách mới
+        else Sai chữ ký, sai schema hoặc hạ phiên bản
+            A->>DB: Ghi security_events POLICY_REJECTED
+            Note over A,DB: Giữ chính sách tốt gần nhất
+        end
+    end
+    Note over A,DB: Mất mạng: tiếp tục áp chính sách đã lưu

@@ -1,0 +1,38 @@
+flowchart LR
+    Server["Server<br/>FastAPI"]
+    Windows["Windows<br/>LockWorkStation"]
+
+    subgraph Agent["Agent trên máy trẻ"]
+        GUI["Giao diện<br/>agent_gui.py"]
+        Core["AgentClient<br/>heartbeat 60 giây"]
+        Policy["policy<br/>Policy Sync và HMAC Verify"]
+        Counter["screen_time<br/>Screen-time Counter"]
+        Enforce["enforcement<br/>Workstation Enforcement"]
+        Clock["clock<br/>Clock Monitor"]
+        Realtime["realtime + commands<br/>Realtime Command"]
+        Requests["requests<br/>Extra-time Request"]
+        DB[("agent.db<br/>SQLite")]
+    end
+
+    Server -- "heartbeat, policy" --> Core
+    Server -- "WebSocket: lệnh khẩn" --> Realtime
+    Requests -- "xin thêm giờ" --> Server
+
+    Core --> Policy
+    Core --> Clock
+    Policy -- "chính sách đã xác minh" --> Counter
+    Clock -- "giờ tin cậy" --> Counter
+    Counter -- "hết quota, ngoài lịch" --> Enforce
+    Realtime -- "khóa ngay, cộng giờ" --> Enforce
+    Realtime -- "bonus" --> Counter
+    Enforce --> Windows
+
+    Counter -- "còn lại, cảnh báo" --> GUI
+    Realtime -- "thông báo" --> GUI
+    GUI --> Requests
+
+    Policy --- DB
+    Counter --- DB
+    Clock --- DB
+    Realtime --- DB
+    Enforce --- DB

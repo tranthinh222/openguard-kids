@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -15,7 +15,6 @@ from openguard_agent import AgentClient, AgentConfig, AgentNotEnrolledError, Age
 from service.policy import PolicyRepository
 from service.policy.models import Policy
 from service.screen_time.counter import TickResult
-from service.clock import ClockMonitor
 from service.content_runtime import ContentRuntime
 from service.runtime_lock import RuntimeLock
 
@@ -77,6 +76,17 @@ def describe_error(exc: Exception) -> str:
 def needs_reenroll(exc: Exception) -> bool:
     """The server rejected this device's tokens, so only a new pairing can fix it."""
     return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 401
+
+
+def connection_state(error: Exception | None) -> tuple[str, str]:
+    """(connection, message) shown by the tray after a heartbeat attempt."""
+    if error is None:
+        return "ok", ""
+    if is_network_error(error):
+        return "offline", describe_error(error)
+    if needs_reenroll(error):
+        return "rejected", describe_error(error)
+    return "error", describe_error(error)
 
 
 def format_sync_time(value: str | None, now: datetime | None = None) -> str:
@@ -151,11 +161,12 @@ def policy_summary(policy: Policy | None, weekday: int) -> dict[str, str]:
 
 
 class AgentController:
-    def __init__(self, config: AgentConfig | None = None):
+    def __init__(self, config: AgentConfig | None = None, host=None, transport: httpx.BaseTransport | None = None):
         self.config = config or AgentConfig.from_env()
+        self.host = host
+        self.transport = transport
         self.store = StateStore(self.config.state_path)
-        self.clock_monitor = ClockMonitor(self.config.database_path or self.config.state_path.with_name("agent.db"),
-                                          report_timezone=timezone(timedelta(minutes=self.config.report_timezone_offset_minutes)))
+        self.clock_monitor = self.config.clock_monitor()
         # Commands arrive over WebSocket or heartbeat; both report through this callback.
         self.on_command_event: Callable[[dict], None] | None = None
 
@@ -167,7 +178,7 @@ class AgentController:
 
     def enroll(self, code: str, server_url: str) -> AgentState:
         self.set_server_url(server_url)
-        client = AgentClient(self.config, self.store)
+        client = AgentClient(self.config, self.store, transport=self.transport)
         try:
             return client.enroll(normalize_enrollment_code(code))
         finally:
@@ -175,7 +186,7 @@ class AgentController:
 
     def heartbeat(self) -> dict:
         client = AgentClient(self.config, self.store, on_command_event=self.on_command_event,
-                             clock_monitor=self.clock_monitor)
+                             clock_monitor=self.clock_monitor, host=self.host, transport=self.transport)
         try:
             return client.heartbeat()
         finally:
@@ -190,14 +201,14 @@ class AgentController:
             return None
 
     def request_extra_time(self, minutes: int = 15) -> dict:
-        client = AgentClient(self.config, self.store, clock_monitor=self.clock_monitor)
+        client = AgentClient(self.config, self.store, clock_monitor=self.clock_monitor, host=self.host, transport=self.transport)
         try:
             return client.request_extra_time(minutes)
         finally:
             client.close()
 
     def transparency(self):
-        client = AgentClient(self.config, self.store, clock_monitor=self.clock_monitor)
+        client = AgentClient(self.config, self.store, clock_monitor=self.clock_monitor, host=self.host, transport=self.transport)
         try:
             day = self.clock_monitor.trusted_now().date().isoformat() if self.clock_monitor.ready else datetime.now().date().isoformat()
             try:
@@ -272,7 +283,8 @@ class ProtectionWorker:
 
     def _run(self, stop: threading.Event) -> None:
         client = AgentClient(self.controller.config, self.controller.store, on_command_event=self.on_event,
-                             clock_monitor=self.controller.clock_monitor)
+                             clock_monitor=self.controller.clock_monitor, host=self.controller.host,
+                             transport=self.controller.transport)
         websocket = None
         lease = None
         content = ContentRuntime(client, self.on_event)

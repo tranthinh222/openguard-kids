@@ -1,0 +1,6 @@
+flowchart LR
+    HB["Heartbeat<br/>nhận giờ server"] --> Over{"Giờ máy lệch<br/>quá 120 giây?"}
+    Over -- "Có" --> Event[("Ghi nhận<br/>chỉnh đồng hồ")]
+    HB --> Anchor["Neo giờ server với<br/>đồng hồ đơn điệu"]
+    Anchor --> Trusted["Giờ tin cậy<br/>không phụ thuộc giờ máy"]
+    Trusted --> Use["Xác định ngày tính quota<br/>và ô lịch tuần"]
