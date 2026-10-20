@@ -6,17 +6,12 @@ from app.core.security import sign_policy
 from app.models.child import Child
 from app.models.policy import Policy
 
-DEFAULT_POLICY = {
-    "screen_time": {
-        "weekday_minutes": 90,
-        "weekend_minutes": 120,
-    },
-    "weekly_schedule": [],
-    "apps": [],
-    "domains": [],
-}
+from app.services.policy_service import default_policy_payload
 
-def create_child(db: Session, parent_id: str, display_name: str, birth_year: int | None) -> Child:
+DEFAULT_POLICY = default_policy_payload()
+
+def create_child(db: Session, parent_id: str, display_name: str, birth_year: int | None,
+                 source_ip: str | None = None) -> Child:
     child = Child(
         parent_id=parent_id,
         display_name=display_name,
@@ -35,6 +30,9 @@ def create_child(db: Session, parent_id: str, display_name: str, birth_year: int
     )
 
     db.add(policy)
+    from app.services.control_audit import record
+    record(db, child.id, parent_id, source_ip, "child_created",
+           new={"display_name": display_name, "birth_year": birth_year, "policy_version": 1})
     db.commit()
     db.refresh(child)
 

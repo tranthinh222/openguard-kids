@@ -1,0 +1,136 @@
+"""Idempotent processing for remote device commands."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable
+
+from service.enforcement import EnforcementReason, RemoteLockRepository, WorkstationEnforcer
+from service.screen_time.counter import UsageRepository
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    command_id: str
+    status: str
+    error: str | None = None
+    duplicate: bool = False
+
+
+class ProcessedCommandRepository:
+    def __init__(self, path: Path):
+        self.path = path
+        with sqlite3.connect(path) as db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS processed_commands (
+                    command_id TEXT PRIMARY KEY, command_type TEXT NOT NULL,
+                    status TEXT NOT NULL, error TEXT, processed_at TEXT NOT NULL
+                )
+            """)
+
+    def get(self, command_id: str) -> CommandResult | None:
+        with sqlite3.connect(self.path) as db:
+            row = db.execute("SELECT status, error FROM processed_commands WHERE command_id=?", (command_id,)).fetchone()
+        return None if row is None else CommandResult(command_id, row[0], row[1], True)
+
+    def save(self, command_id: str, command_type: str, status: str, error: str | None) -> None:
+        with sqlite3.connect(self.path) as db:
+            db.execute(
+                "INSERT OR IGNORE INTO processed_commands VALUES (?, ?, ?, ?, ?)",
+                (command_id, command_type, status, error, datetime.now().astimezone().isoformat()),
+            )
+
+
+class CommandHandler:
+    TYPES = {"LOCK_NOW", "UNLOCK", "ADD_TIME", "REQUEST_REJECTED", "REQUEST_REVIEWED"}
+    _locks = {}
+    _guard = threading.Lock()
+
+    def __init__(
+        self,
+        repository: ProcessedCommandRepository,
+        usage: UsageRepository,
+        enforcer: WorkstationEnforcer,
+        today: Callable = lambda: datetime.now().astimezone().date(),
+        on_event: Callable[[dict], None] | None = None,
+        remote_lock: RemoteLockRepository | None = None,
+        event_queue=None, event_now=None, policy_id=None,
+    ):
+        self.repository = repository
+        self.usage = usage
+        self.enforcer = enforcer
+        self.today = today
+        self.on_event = on_event or (lambda _event: None)
+        self.remote_lock = remote_lock
+        self.event_queue, self.event_now, self.policy_id = event_queue, event_now, policy_id
+        with self._guard:
+            self._mutex = self._locks.setdefault(str(repository.path.resolve()).casefold(), threading.RLock())
+
+    def handle(self, command: dict[str, Any]) -> CommandResult:
+        with self._mutex:
+            return self._handle(command)
+
+    def _handle(self, command: dict[str, Any]) -> CommandResult:
+        command_id = command.get("command_id")
+        command_type = command.get("type")
+        if not isinstance(command_id, str) or not command_id:
+            return CommandResult("", "failed", "missing command_id")
+        previous = self.repository.get(command_id)
+        if previous:
+            return previous
+        error = None
+        event: dict[str, Any] | None = None
+        try:
+            if command_type not in self.TYPES:
+                raise ValueError("unsupported command type")
+            payload = command.get("payload") or {}
+            if not isinstance(payload, dict):
+                raise ValueError("payload must be an object")
+            if command_type == "LOCK_NOW":
+                # Persist first: the counter keeps re-locking until the parent sends UNLOCK.
+                if self.remote_lock is not None:
+                    self.remote_lock.set(True)
+                if not self.enforcer.enforce(EnforcementReason.REMOTE_LOCK, force=True):
+                    raise RuntimeError("LockWorkStation failed")
+            elif command_type == "UNLOCK":
+                if self.remote_lock is not None:
+                    self.remote_lock.set(False)
+                self.enforcer.allow_unlock()
+                event = {"type": "REMOTE_UNLOCKED"}
+            elif command_type == "REQUEST_REJECTED":
+                event = {"type": "REQUEST_REJECTED", "response": payload.get("response")}
+            elif command_type == "REQUEST_REVIEWED":
+                event = {"type": "REQUEST_REVIEWED", "response": payload.get("response"),
+                         "subject": payload.get("subject"), "approved": payload.get("approved") is True}
+            else:
+                minutes = payload.get("minutes")
+                if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 240:
+                    raise ValueError("ADD_TIME minutes must be between 1 and 240")
+                with sqlite3.connect(self.repository.path, timeout=10) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    prior = db.execute('SELECT status,error FROM processed_commands WHERE command_id=?', (command_id,)).fetchone()
+                    if prior:
+                        return CommandResult(command_id, prior[0], prior[1], True)
+                    stamp = datetime.now().astimezone().isoformat()
+                    db.execute('INSERT INTO usage_daily VALUES(?,0,?,?) ON CONFLICT(date) DO UPDATE SET '
+                               'bonus_seconds=bonus_seconds+excluded.bonus_seconds,updated_at=excluded.updated_at',
+                               (self.today().isoformat(), minutes * 60, stamp))
+                    db.execute('INSERT INTO processed_commands VALUES(?,?,?,?,?)', (command_id, command_type, 'completed', None, stamp))
+                    if self.event_queue:
+                        self.event_queue.emit('override_granted', self.event_now(), policy_id=self.policy_id(),
+                                              event_id=str(uuid.uuid5(uuid.NAMESPACE_URL, 'override:' + command_id)), connection=db)
+                event = {"type": "TIME_ADDED", "minutes": minutes, "requested": bool(payload.get("request_id"))}
+            status = "completed"
+        except (ValueError, RuntimeError, OSError, sqlite3.Error) as exc:
+            status, error = "failed", str(exc)[:255]
+        self.repository.save(command_id, str(command_type), status, error)
+        if event is not None and status == "completed":
+            event['command_id'] = command_id
+            self.on_event(event)
+        return CommandResult(command_id, status, error)

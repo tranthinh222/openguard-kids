@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -19,16 +19,22 @@ from app.models.device import Device
 from app.models.enrollment import EnrollmentCode
 from app.models.token import DeviceRefreshToken
 
-def create_enrollment_code(db: Session, parent_id: str, child: Child) -> tuple[str, EnrollmentCode]:
+def create_enrollment_code(db: Session, parent_id: str, child: Child, *,
+                           privacy_notice_version: str, source_ip: str | None = None) -> tuple[str, EnrollmentCode]:
     code = generate_enrollment_code(8)
     record = EnrollmentCode(
         parent_id=parent_id,
         child_id=child.id,
         code_hash=hash_secret(code),
         expires_at=utc_now() + timedelta(minutes=settings.enrollment_code_expire_minutes),
+        consent_at=utc_now(),
+        privacy_notice_version=privacy_notice_version,
     )
 
     db.add(record)
+    from app.services.control_audit import record as audit
+    audit(db, child.id, parent_id, source_ip, "enrollment_consent",
+          new={"consent": True, "privacy_notice_version": privacy_notice_version})
     db.commit()
     db.refresh(record)
 
@@ -39,6 +45,7 @@ def enroll_device(
     code: str,
     device_name: str,
     fingerprint: str,
+    source_ip: str | None = None,
 ) -> tuple[Device, str, str, int]:
     now = utc_now()
 
@@ -52,6 +59,15 @@ def enroll_device(
 
     if record.expires_at < now:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enrollment code expired")
+    if record.consent_at is None or not record.privacy_notice_version:
+        raise HTTPException(status_code=400, detail="Create a new enrollment code after reviewing the privacy notice")
+
+    claimed = db.execute(update(EnrollmentCode).where(
+        EnrollmentCode.id == record.id, EnrollmentCode.used_at.is_(None), EnrollmentCode.expires_at > now,
+    ).values(used_at=now).execution_options(synchronize_session=False))
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail='Enrollment code already used or expired')
 
     device = Device(
         child_id=record.child_id,
@@ -59,6 +75,8 @@ def enroll_device(
         fingerprint_hash=hash_device_fingerprint(fingerprint),
         status="active",
         current_policy_version=0,
+        consent_at=record.consent_at,
+        privacy_notice_version=record.privacy_notice_version,
     )
 
     db.add(device)
@@ -68,11 +86,13 @@ def enroll_device(
     refresh_record = DeviceRefreshToken(
         device_id=device.id,
         token_hash=hash_secret(refresh_token),
-        expires_at=now + timedelta(settings.device_refresh_token_expire_days),
+        expires_at=now + timedelta(days=settings.device_refresh_token_expire_days),
     )
     db.add(refresh_record)
+    from app.services.control_audit import record as audit
+    audit(db, record.child_id, record.parent_id, source_ip, "device_enrolled",
+          new={"device_id": device.id, "device_name": device_name})
 
-    record.used_at = now
     db.commit()
     db.refresh(device)
 

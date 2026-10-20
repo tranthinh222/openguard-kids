@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Literal
+import hmac
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -111,7 +112,7 @@ def get_current_parent_for_write(
     # dashboard requests must send the per-session CSRF token explicitly.
     if auth.method == "session":
         supplied = request.headers.get(CSRF_HEADER_NAME, "")
-        if auth.session is None or supplied != auth.session.csrf_token:
+        if auth.session is None or not hmac.compare_digest(supplied.encode(), auth.session.csrf_token.encode()):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, 
                 detail="Invalid CSRF token"
@@ -139,3 +140,27 @@ def get_current_device(
         )
 
     return device
+
+
+def get_child_view(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> Device:
+    payload = _decode_bearer(credentials)
+    if payload.get("type") not in {"device", "child-view"}:
+        raise HTTPException(403, "Child-view token required")
+    device = db.get(Device, payload["sub"])
+    if device is None or device.status != "active" or device.revoked_at is not None:
+        raise HTTPException(401, "Invalid or revoked device")
+    return device
+
+
+def get_current_admin(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    payload = _decode_bearer(credentials)
+    user = db.get(User, payload["sub"])
+    if payload.get("type") != "admin" or user is None or not user.is_active or user.role != "admin":
+        raise HTTPException(403, "Administrator token required")
+    return user

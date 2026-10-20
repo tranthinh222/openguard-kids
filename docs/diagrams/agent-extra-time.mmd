@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant C as Trẻ (Giao diện Agent)
+    participant A as Agent
+    participant S as Server
+    participant P as Phụ huynh (Dashboard)
+
+    C->>A: Bấm "Xin thêm 15 phút"
+    A->>S: POST /agent/requests (extra_time, 15 phút)
+    S-->>A: Yêu cầu ở trạng thái pending
+    A-->>C: "Đã gửi yêu cầu. Đang chờ phụ huynh duyệt."
+
+    S-->>P: Hiện yêu cầu trên trang Yêu cầu
+    alt Phụ huynh duyệt
+        P->>S: Duyệt
+        S-->>A: Lệnh ADD_TIME qua WebSocket
+        A->>A: Cộng 15 phút bonus
+        A-->>C: "Phụ huynh đã duyệt. Em có thêm 15 phút."
+    else Phụ huynh từ chối
+        P->>S: Từ chối (kèm lời nhắn)
+        S-->>A: Lệnh REQUEST_REJECTED qua WebSocket
+        A-->>C: "Phụ huynh đã từ chối yêu cầu thêm giờ."
+    end
+    A-->>S: ack

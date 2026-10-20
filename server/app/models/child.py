@@ -1,7 +1,9 @@
-from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy import ForeignKey, Integer, String, DateTime
+from datetime import datetime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, uuid4_str
+from app.core.encrypted import EncryptedText
 
 class Child(TimestampMixin, Base):
     __tablename__="children"
@@ -12,7 +14,7 @@ class Child(TimestampMixin, Base):
         index=True,
         nullable=False,
     )
-    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    display_name: Mapped[str] = mapped_column(EncryptedText("child.display_name", 100), nullable=False)
     birth_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     parent = relationship("User", back_populates="children")

@@ -1,14 +1,15 @@
 from datetime import timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_parent, get_db
+from app.api.deps import get_current_parent, get_current_parent_for_write, get_db
 from app.models.user import User
 from app.models.enrollment import EnrollmentCode
 from app.core.security import utc_now_aware
 from app.schemas.device import as_utc
+from app.schemas.enrollment import EnrollmentConsent
 from app.schemas.enrollment import (
     AgentEnrollRequest,
     AgentEnrollResponse,
@@ -28,11 +29,17 @@ router = APIRouter()
 )
 def create_code(
     child_id: str,
-    parent: User = Depends(get_current_parent),
+    request: Request,
+    payload: EnrollmentConsent,
+    parent: User = Depends(get_current_parent_for_write),
     db: Session = Depends(get_db),
 ):
     child = get_owned_child(db, parent.id, child_id)
-    code, record = create_enrollment_code(db, parent.id, child)
+    if not payload.consent:
+        raise HTTPException(422, 'Privacy consent is required before pairing')
+    code, record = create_enrollment_code(
+        db, parent.id, child, privacy_notice_version=payload.privacy_notice_version,
+        source_ip=request.client.host if request.client else None)
 
     return EnrollmentCodeResponse(
         enrollment_id=record.id,
@@ -77,6 +84,7 @@ def enrollment_status(
 )
 def enroll(
     payload: AgentEnrollRequest,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     device, access_token, refresh_token, expires_in = enroll_device(
@@ -84,6 +92,7 @@ def enroll(
         code=payload.code,
         device_name=payload.device_name,
         fingerprint=payload.fingerprint,
+        source_ip=request.client.host if request.client else None,
     )
 
     return AgentEnrollResponse(

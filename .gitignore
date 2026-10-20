@@ -13,3 +13,7 @@ htmlcov/
 
 QuanLyMayTinhTreEm.pdf
 .vscode/
+
+
+# Báo cáo kỹ thuật mạng (LaTeX, script đo, kết quả đo) — không commit
+docs/BaoCaoKyThuatMang/

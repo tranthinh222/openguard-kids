@@ -1,0 +1,11 @@
+# Python must include Tcl/Tk (tkinter); SQLite is part of Python.
+python-dotenv==1.2.3
+httpx==0.28.1
+websockets==17.1
+cryptography==50.0.1
+psutil>=7.0,<8
+dnspython>=2.8,<3
+pystray>=0.19.5,<0.20
+Pillow>=11,<13
+tldextract>=5.1,<6
+pywin32>=306; sys_platform == "win32"

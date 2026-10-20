@@ -94,3 +94,53 @@ def test_heartbeat_worker_restarts_while_previous_run_is_finishing():
     first.join(2)
     second.join(2)
     assert results == []  # stopped runs never report stale results to the GUI
+
+
+def test_format_remaining_covers_each_enforcement_state():
+    from gui_controller import format_remaining
+    from service.screen_time.counter import TickResult
+
+    assert format_remaining(None) == "—"
+    assert format_remaining(TickResult(1, 60, 4350, False, "counted")) == "1 giờ 12 phút"
+    assert format_remaining(TickResult(1, 60, 125, False, "idle")) == "2 phút 05 giây"
+    assert format_remaining(TickResult(0, 0, 0, False, "no_policy")) == "Chưa có chính sách"
+    assert format_remaining(TickResult(0, 0, 0, True, "remote_lock")) == "Phụ huynh đang khóa"
+    assert format_remaining(TickResult(0, 60, 500, True, "outside_schedule")) == "Ngoài khung giờ"
+    assert format_remaining(TickResult(0, 180, 0, False, "grace_period")) == "Đã hết giờ"
+
+
+def test_format_schedule_merges_half_hour_slots():
+    from gui_controller import format_schedule
+
+    day = [False] * 48
+    for slot in [*range(14, 23), *range(26, 48)]:
+        day[slot] = True
+    assert format_schedule(day) == "07:00–11:30, 13:00–24:00"
+    assert format_schedule([True] * 48) == "Cả ngày"
+    assert format_schedule([False] * 48) == "Không được dùng"
+
+
+def test_policy_summary_reads_cached_policy(tmp_path: Path):
+    from gui_controller import policy_summary
+    from service.policy import PolicyManager, PolicyRepository
+    from service.policy.verifier import expected_signature
+
+    schedule = [True] * 336
+    schedule[48:96] = [False] * 48  # Tuesday is fully blocked
+    payload = {
+        "screen_time": {"weekday_minutes": 90, "weekend_minutes": 120, "idle_timeout_sec": 300,
+                        "grace_period_sec": 60, "warning_minutes": [10, 5, 1]},
+        "weekly_schedule": schedule, "apps": [], "domains": [],
+    }
+    database = tmp_path / "agent.db"
+    PolicyManager(PolicyRepository(database), "secret").accept(
+        {"id": "p1", "version": 4, "payload": payload, "signature": expected_signature(payload, 4, "secret")}
+    )
+    controller = AgentController(AgentConfig("http://127.0.0.1:8000", tmp_path / "state.json", database_path=database))
+
+    assert policy_summary(controller.current_policy(), 1) == {
+        "version": "4", "weekday": "90 phút mỗi ngày", "weekend": "120 phút mỗi ngày",
+        "schedule": "Không được dùng", "idle": "không tính sau 5 phút",
+        "warnings": "trước 10, 5, 1 phút", "grace": "60 giây để lưu bài",
+    }
+    assert policy_summary(None, 0)["version"] == "—"

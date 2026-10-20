@@ -4,6 +4,7 @@ export async function getSession(force = false) {
 	if (cachedSession && !force) return cachedSession;
 
 	const response = await fetch("/api/v1/auth/session", {
+		cache: 'no-store',
 		method: "GET",
 		credentials: "same-origin",
 		headers: { Accept: "application/json" },
@@ -28,6 +29,7 @@ export function clearSessionCache() {
 
 export async function apiRequest(url, options = {}) {
 	const response = await fetch(url, {
+		cache: 'no-store',
 		credentials: "same-origin",
 		...options,
 		headers: {
@@ -90,6 +92,11 @@ export async function apiError(response) {
 	}
 	const error = new Error(message);
 	error.status = response.status;
+    if (response.status === 429) {
+        const seconds = Number(response.headers.get('Retry-After'));
+        error.retryAfterMs = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 60000;
+        error.message = `Thao tác quá nhanh. Vui lòng thử lại sau ${Math.ceil(error.retryAfterMs / 1000)} giây.`;
+    }
 	return error;
 }
 

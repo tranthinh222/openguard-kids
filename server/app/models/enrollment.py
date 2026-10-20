@@ -6,6 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, uuid4_str, utc_now
 
 class EnrollmentCode(Base):
+    consent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    privacy_notice_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     __tablename__  = "enrollment_codes"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)

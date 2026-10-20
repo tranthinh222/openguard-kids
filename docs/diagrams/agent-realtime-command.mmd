@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant P as Phụ huynh (Dashboard)
+    participant S as Server
+    participant A as Agent
+    participant W as Windows
+
+    A->>S: Mở WebSocket /agent/ws (Bearer token)
+    S-->>A: Gửi các lệnh còn trong hàng đợi
+
+    P->>S: Gửi lệnh LOCK_NOW, UNLOCK hoặc ADD_TIME
+    S->>S: Lưu lệnh vào device_commands
+    alt Agent đang kết nối
+        S-->>A: Đẩy lệnh qua WebSocket (dưới 5 giây)
+    else Agent ngoại tuyến
+        Note over S,A: Lệnh chờ, giao ở heartbeat hoặc lần kết nối sau
+    end
+
+    A->>A: Kiểm tra command_id đã xử lý chưa
+    alt Lệnh mới
+        alt LOCK_NOW
+            A->>W: Khóa máy và giữ khóa
+        else UNLOCK
+            A->>A: Gỡ trạng thái khóa từ xa
+        else ADD_TIME
+            A->>A: Cộng bonus vào quota hôm nay
+        end
+        A->>A: Lưu processed_commands
+    else Lệnh trùng
+        A->>A: Trả lại kết quả cũ, không chạy lại
+    end
+    A-->>S: ack (completed hoặc failed)
+    S-->>P: Cập nhật trạng thái lệnh

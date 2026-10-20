@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+import hmac
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -90,7 +91,7 @@ def logout_dashboard(
     web_session = get_web_session(db, request.cookies.get(SESSION_COOKIE_NAME))
     if web_session is not None:
         supplied_csrf = request.headers.get("X-CSRF-Token", "")
-        if supplied_csrf != web_session.csrf_token:
+        if not hmac.compare_digest(supplied_csrf.encode(), web_session.csrf_token.encode()):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")
         
         revoke_web_session(db, web_session)

@@ -1,0 +1,65 @@
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_device, get_current_parent_for_write, get_db
+from app.models.child import Child
+from app.models.device import Device
+from app.models.user import User
+from app.schemas.command import CommandAckRequest, CommandCreateRequest, ParentCommandResponse
+from app.services.command_service import ack_command, create_command, push_command
+
+router = APIRouter()
+
+def owned_device(
+    db: Session,
+    parent_id: str,
+    device_id: str,
+) -> Device:
+    device = db.scalar(
+        select(Device).join(Child, Device.child_id == Child.id)
+        .where(Device.id == device_id, Child.parent_id == parent_id)
+    )
+
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+
+    return device
+
+@router.post("/devices/{device_id}/commands", response_model=ParentCommandResponse, status_code=status.HTTP_201_CREATED)
+async def parent_create_command(
+    device_id: str,
+    request: Request,
+    payload: CommandCreateRequest,
+    parent: User = Depends(get_current_parent_for_write),
+    db: Session = Depends(get_db),
+):
+    device = owned_device(db, parent.id, device_id)
+    if device.status != 'active' or device.revoked_at is not None:
+        raise HTTPException(409, 'Device is revoked or inactive')
+    body = {"minutes": payload.minutes} if payload.type == "ADD_TIME" else {}
+
+    if payload.type == "ADD_TIME" and payload.minutes is None:
+        raise HTTPException(status_code=422, detail="minutes is required for ADD_TIME")
+
+    from app.services.control_audit import record
+    command = create_command(db, device.id, payload.type, body, commit=False)
+    record(db, device.child_id, parent.id, request.client.host if request.client else None,
+           "command_created", new={"command_id": command.id, "type": payload.type, "payload": body})
+    db.commit()
+    await push_command(db, command)
+
+    return command
+
+@router.post("/agent/commands/{command_id}/ack", response_model=ParentCommandResponse)
+def agent_ack_command(
+    command_id: str,
+    payload: CommandAckRequest,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    command = ack_command(db, device.id, command_id, payload.status, payload.error)
+    if command is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Command not found")
+
+    return command

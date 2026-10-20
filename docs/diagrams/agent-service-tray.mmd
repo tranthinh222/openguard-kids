@@ -1,0 +1,30 @@
+flowchart LR
+    subgraph Server["OGK-Server (FastAPI)"]
+        API["/api/v1/agent/*\nheartbeat · policy · events · ws"]
+    end
+
+    subgraph Session0["Session 0 — Windows Service (LocalSystem)"]
+        Runtime["AgentRuntime\n(service/runtime.py)"]
+        Supervisor["Supervisor 2s\nrestart worker · crash loop → exit(1)"]
+        Protection["ProtectionWorker\nscreen-time · WebSocket · app/DNS"]
+        Heartbeat["HeartbeatWorker 60s"]
+        DNS["DNS proxy 127.0.0.1:53 + [::1]:53"]
+        Guard["NetworkGuard\nadapter DNS · firewall 53/853 · browser DoH policy"]
+        DB[("ProgramData\\OpenGuardKids\\agent.db\nACL: SYSTEM + Administrators\nclock_anchor · grace_state · events")]
+        Runtime --> Supervisor --> Protection & Heartbeat
+        Protection --> DNS
+        Supervisor --> Guard
+        Protection & Heartbeat --> DB
+    end
+
+    subgraph Session1["Session của trẻ"]
+        Tray["Tray UI (agent_gui.py)\nchỉ hiển thị + gửi yêu cầu"]
+        Apps["Ứng dụng / trình duyệt"]
+    end
+
+    SCM["Service Control Manager\nauto start · restart 5s/5s/30s\nDACL: user không stop được"] -.-> Runtime
+    Tray <-->|"Named pipe \\\\.\\pipe\\OpenGuardKids\nDACL SY/BA/IU · reject remote"| Runtime
+    Runtime -.->|"TrayWatchdog: CreateProcessAsUser"| Tray
+    Runtime -.->|"WTS: lock state · LockWorkStation"| Session1
+    Apps -->|"DNS"| DNS
+    Heartbeat & Protection <-->|"HTTPS / WSS"| API

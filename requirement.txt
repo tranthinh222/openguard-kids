@@ -6,6 +6,7 @@ alembic==1.20.0
 
 pydantic==2.13.5
 pydantic-settings==2.15.0
+python-dotenv==1.2.3
 email-validator==2.3.0
 
 argon2-cffi==25.1.0
@@ -16,5 +17,14 @@ cryptography==50.0.1
 python-multipart==0.0.32
 jinja2==3.1.6
 httpx==0.28.1
+websockets==17.1
 pytest==9.1.1
 pytest-asyncio==1.4.0
+
+psutil>=7.0,<8
+dnspython>=2.8,<3
+pystray>=0.19.5,<0.20
+Pillow>=11,<13
+tldextract>=5.1,<6
+# Windows Service, named-pipe IPC and WTS session APIs (agent on Windows only)
+pywin32>=306; sys_platform == "win32"

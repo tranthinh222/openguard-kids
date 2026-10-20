@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -7,10 +7,10 @@ from app.models.device import Device
 from app.models.user import User
 from app.schemas.child import ChildCreateRequest, ChildResponse, ChildSummaryResponse
 from app.schemas.device import ParentDeviceResponse
-from app.schemas.policy import PolicyResponse
+from app.schemas.policy import PolicyResponse, PolicyUpdateRequest
 from app.services.child_service import create_child, get_owned_child, list_children
 from app.services.device_service import device_is_online
-from app.services.policy_service import get_latest_policy
+from app.services.policy_service import get_latest_policy, update_policy, push_policy_update
 
 router = APIRouter()
 
@@ -18,6 +18,7 @@ router = APIRouter()
 @router.post("", response_model=ChildResponse, status_code=status.HTTP_201_CREATED)
 def create(
     payload: ChildCreateRequest,
+    request: Request,
     parent: User = Depends(get_current_parent_for_write),
     db: Session = Depends(get_db),
 ):
@@ -26,6 +27,7 @@ def create(
         parent_id=parent.id,
         display_name=payload.display_name,
         birth_year=payload.birth_year,
+        source_ip=request.client.host if request.client else None,
     )
 
 
@@ -81,6 +83,8 @@ def get_child_devices(
             status=device.status,
             last_seen_at=device.last_seen_at,
             current_policy_version=device.current_policy_version,
+            quota_used_sec=device.quota_used_sec,
+            clock_drift_sec=device.clock_drift_sec,
             online=device_is_online(device),
         )
         for device in devices
@@ -95,3 +99,18 @@ def get_child_policy(
 ):
     child = get_owned_child(db, parent.id, child_id)
     return get_latest_policy(db, child.id)
+
+@router.put("/{child_id}/policy", response_model=PolicyResponse)
+async def update_child_policy(
+    child_id: str,
+    request: Request,
+    payload: PolicyUpdateRequest,
+    parent: User = Depends(get_current_parent_for_write),
+    db: Session = Depends(get_db),
+):
+    child = get_owned_child(db, parent.id, child_id)
+
+    policy = update_policy(db, child.id, payload.payload, actor_id=parent.id,
+                           source_ip=request.client.host if request.client else None)
+    await push_policy_update(db, policy)
+    return policy

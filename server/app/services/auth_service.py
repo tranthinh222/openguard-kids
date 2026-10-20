@@ -3,10 +3,12 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password, utc_now, verify_password
 from app.models.user import User
+from app.core.encrypted import email_lookup
 import re
 
 PASSWORD_PATTERN = re.compile(
@@ -27,17 +29,22 @@ def register_parent(db: Session, email: str, password: str) -> User:
     normalized_email = email.strip().lower()
 
 
-    existing = db.scalar(select(User).where(User.email == normalized_email))
+    existing = db.scalar(select(User).where(User.email_lookup_hash == email_lookup(normalized_email)))
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
     user = User(
         email=normalized_email,
+        email_lookup_hash=email_lookup(normalized_email),
         password_hash=hash_password(password),
         role="parent",
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, 'Email already registered') from exc
     db.refresh(user)
 
     return user
@@ -46,7 +53,7 @@ def authenticate_parent(db: Session, email: str, password: str) -> User:
     normalized_email = email.strip().lower()
     validate_password(password)
     
-    user = db.scalar(select(User).where(User.email == normalized_email))
+    user = db.scalar(select(User).where(User.email_lookup_hash == email_lookup(normalized_email)))
 
     # Avoid revealing whether an email exists.
     if user is None:
@@ -92,7 +99,7 @@ def login_parent(db: Session, email: str, password: str) -> tuple[str, int]:
     user = authenticate_parent(db, email, password)
     token = create_access_token(
         subject=user.id,
-        token_type="parent",
+        token_type="admin" if user.role == "admin" else "parent",
         expires_minutes=settings.parent_access_token_expire_minutes,
     )
 
@@ -103,8 +110,7 @@ def validate_password(password: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Password must contain between 10 and 128 characters, "
-                "has at least 1 UPPERCASE, 1 digit, and 1 special character; "
-                "only printable ASCIIs are allowed, no spaces."
+                "Độ dài mật khẩu phải từ 10 đến 128 ký tự, "
+                "có ít nhất 1 chữ hoa (A-Z), 1 chữ số (0-9), và 1 ký tự đặc biệt, không cho phép khoảng trắng."
             )
         )

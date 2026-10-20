@@ -1,4 +1,6 @@
 import json
+import os
+import pytest
 from pathlib import Path
 
 import httpx
@@ -7,7 +9,7 @@ from openguard_agent import AgentClient, AgentConfig, AgentState, StateStore
 
 
 def make_client(tmp_path: Path, handler):
-    config = AgentConfig("https://server.test", tmp_path / "state.json")
+    config = AgentConfig("https://server.test", tmp_path / "state.json", tls_cert_sha256="a" * 64)
     store = StateStore(config.state_path)
     return AgentClient(config, store, httpx.MockTransport(handler)), store
 
@@ -74,6 +76,7 @@ def test_heartbeat_refreshes_expired_token(tmp_path):
     assert store.load().last_heartbeat_at is not None
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX mode bits do not verify Windows ACLs')
 def test_state_file_is_private(tmp_path):
     store = StateStore(tmp_path / "state.json")
     store.save(AgentState(device_id="device-1"))
