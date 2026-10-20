@@ -44,8 +44,8 @@ def protected_env_path() -> Path | None:
 
 
 def load_environment() -> None:
-    # Real environment variables take priority, then the protected file, then the project file.
-    for path in (protected_env_path(), Path(__file__).resolve().parents[1] / ".env"):
+    # Process environment > protected service configuration > agent/.env.
+    for path in (protected_env_path(), Path(__file__).resolve().parent / ".env"):
         if path is None:
             continue
         try:

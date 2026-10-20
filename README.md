@@ -1,73 +1,114 @@
-# openguard-kids
+﻿# OpenGuard Kids
 
-## Screen time and remote policy
+Ứng dụng hỗ trợ phụ huynh quản lý thời gian sử dụng máy tính, ứng dụng và website của trẻ trên Windows. Trẻ được xem thời lượng, hoạt động, chính sách và lý do bị chặn; có thể xin thêm giờ hoặc báo chặn nhầm. Không thu phím gõ, ảnh màn hình, nội dung tin nhắn, tiêu đề cửa sổ hay URL đầy đủ.
 
-### Environment files
+## Cài đặt từ máy sạch
 
-| File | Purpose | Loaded automatically? |
-| --- | --- | --- |
-| `.env.example` | Shared local-development template for Server + Agent; safe to commit | No |
-| `.env` | Actual local configuration and secrets; never commit | Yes, by Server and Agent |
-| `server/.env.example` | Server-only deployment template; safe to commit | No |
-| `server/.env.deploy` | Actual Docker deployment variables; never commit | Only via `docker --env-file` |
+Hướng dẫn dành cho Windows 10/11 x64, PowerShell và môi trường lab. Mục tiêu là dựng hệ thống trong khoảng 15 phút sau khi có Python và tải xong phụ thuộc; chưa có phép đo nghiệm thu thời gian trên máy sạch.
 
-For local development, create root `.env` from root `.env.example` only when
-it does not exist. Merge newly added settings into an existing `.env` manually;
-copying the template over it would replace current secrets and configuration.
-The files are alternatives for different environments, not three configuration
-layers to concatenate. See [server deployment instructions](server/README.md).
+Cần cài Python **3.13 x64** từ bộ cài có pip và Tcl/Tk (Tkinter), Git nếu clone repository, trình duyệt và kết nối Internet để tải thư viện. SQLite đi kèm Python, không cần cài database server. Agent cần quyền Administrator để cài dịch vụ; tài khoản của trẻ phải là tài khoản thường. Docker và Node.js không bắt buộc để chạy sản phẩm; Node.js 24 dùng khi chạy test JavaScript.
 
-Precedence is **process environment > root `.env` > code defaults** for settings
-loaded by the application. `server/.env` is not automatically loaded. Server
-settings use names such as `DATABASE_URL`; Agent settings use the `OGK_` prefix.
-Keep `POLICY_HMAC_SECRET` and `OGK_POLICY_HMAC_SECRET` identical, and keep the
-server/agent report timezone offsets consistent. Restart the affected process
-after changes. A PowerShell `$env:...` override continues to take precedence
-until removed or the shell is closed.
+### 1. Chuẩn bị môi trường
 
-`RETENTION_INTERVAL_SEC` controls how often the server runs cleanup; it does
-not change the 90-day activity retention age. The code default is 86400 seconds
-(daily). The deployment template currently specifies 776000 seconds (about
-9 days); choose the intended cleanup frequency when preparing deployment.
-
-Week 02 adds F1 + core F4: versioned screen-time policies, 7×48 weekly schedule,
-Agent-side active-use counting with `time.monotonic()`, Windows idle detection,
-10/5/1 minute warnings, grace period, workstation locking, extra-time requests,
-and queued/realtime device commands.
-
-Clock drift handling, restart/offline behavior and manual verification are
-documented in [docs/CLOCK_DRIFT.md](docs/CLOCK_DRIFT.md).
-
-Before running locally, copy `.env.example` to `.env` if `.env` doesn't exist.
-The Agent and Server load this shared project-level file automatically; keep
-`POLICY_HMAC_SECRET` and `OGK_POLICY_HMAC_SECRET` identical. Then run:
-
-```bash
-cd server
-alembic upgrade head
-uvicorn app.main:app --reload                      # agent on the same machine
-uvicorn app.main:app --host 0.0.0.0 --port 8000    # agent on another machine
-```
-
-`uvicorn` listens on 127.0.0.1 by default, which other machines cannot reach.
-When the agent runs on another machine, start the server with `--host 0.0.0.0`
-and allow TCP 8000 through the server machine's firewall.
-
-On the Windows Agent machine, copy `.env.example` to `.env`, set `OGK_SERVER_URL`
-to the server's LAN address (for example `http://192.168.1.10:8000`, not
-`127.0.0.1`) and set `OGK_POLICY_HMAC_SECRET` to the server's
-`POLICY_HMAC_SECRET`, then run:
+Mở PowerShell tại thư mục gốc source đã tải về, ví dụ `D:\Code\openguard-kids`:
 
 ```powershell
-python agent/openguard_agent.py run
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirement.txt
+if (!(Test-Path server/.env)) { Copy-Item server/.env.example server/.env }
+if (!(Test-Path agent/.env)) { Copy-Item agent/.env.example agent/.env }
 ```
 
-On Windows the agent keeps its data in `C:\ProgramData\OpenGuardKids`. After
-`agent/openguard_service.py install` that folder is writable only by SYSTEM and
-Administrators, so do not use `run` any more: the service already runs the agent,
-and `agent_gui.py` is the tray UI. Without the service, run `run` from an
-elevated PowerShell ("Run as Administrator"), or point `OGK_STATE_PATH` at another
-folder for testing. See `agent/WEEK04.md`.
+Nếu triển khai trên hai máy, mỗi máy tạo `.venv` riêng và chỉ cài `server/requirements.txt` hoặc `agent/requirements.txt`. Không sao chép virtual environment giữa các máy. Giữ thư mục source và Python ở vị trí ổn định sau khi cài dịch vụ.
 
-The dashboard Child Detail page now edits quota/schedule and reviews extra-time
-requests. See `WEEK02_CHANGES.md` for the complete add/modify/remove list.
+### 2. Điền cấu hình
+
+Sinh hai secret khác nhau (chạy lệnh hai lần), dùng lần lượt cho JWT và chữ ký policy:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Sinh khóa mã hóa **một lần**, sao lưu và giữ nguyên khi nâng cấp:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"
+```
+
+| File | Biến cần điền |
+| --- | --- |
+| `server/.env` | `JWT_SECRET`, `POLICY_HMAC_SECRET`, `DATA_ENCRYPTION_KEY` bằng các giá trị vừa sinh |
+| `agent/.env` | `OGK_POLICY_HMAC_SECRET` giống `POLICY_HMAC_SECRET`; `OGK_SERVER_URL=http://127.0.0.1:8000` khi cùng máy |
+
+Giữ `ENVIRONMENT=development`, `WEB_COOKIE_SECURE=false` cho HTTP lab. Agent trên máy khác dùng IP LAN của server thay `127.0.0.1`. Các file `.env` chứa secret, không commit và không đưa vào ảnh báo cáo. Biến môi trường process ưu tiên hơn `.env`. Hướng dẫn HTTPS và pin chứng chỉ nằm trong [README server](server/README.md) và [README agent](agent/README.md).
+
+### 3. Khởi động server và tạo tài khoản demo
+
+```powershell
+cd server
+..\.venv\Scripts\python.exe -m alembic upgrade head
+..\.venv\Scripts\python.exe -m app.maintenance check
+..\.venv\Scripts\python.exe -m app.seed --email demo@example.com --demo-child
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Lệnh seed hỏi mật khẩu tương tác. Dùng mật khẩu 10–128 ký tự ASCII không khoảng trắng, có chữ hoa, số và ký tự đặc biệt. **Tài khoản demo: `demo@example.com`; mật khẩu: giá trị bạn vừa nhập.** Source không có mật khẩu chung. Không chạy seed lại với email đã tồn tại.
+
+Mở `http://127.0.0.1:8000/login`, đăng nhập, mở hồ sơ `Demo Child`. `/health` và `/ready` phải trả thành công. Nếu agent ở máy khác, dùng `--host 0.0.0.0`, cho phép TCP 8000 qua firewall trong mạng lab và dùng IP LAN để truy cập.
+
+### 4. Cài agent và ghép thiết bị
+
+Giữ cửa sổ server chạy. Mở PowerShell **Run as Administrator** mới tại thư mục gốc:
+
+```powershell
+.\.venv\Scripts\python.exe agent\openguard_service.py install
+.\.venv\Scripts\python.exe agent\openguard_service.py status
+```
+
+Service `OpenGuardKids` chạy LocalSystem, tự mở Tray trong phiên đăng nhập. Mặc định service cấu hình DNS máy về proxy cục bộ; xem [hướng dẫn agent](agent/README.md) trước khi dùng trên máy có cấu hình mạng riêng.
+
+Trên dashboard, xác nhận thông báo thu thập dữ liệu rồi tạo mã ghép đôi. Nhập mã 8 ký tự vào Tray và ghép trong 10 phút. Sau heartbeat, thiết bị hiện online. Không chạy thêm `openguard_agent.py run` khi service đã chạy.
+
+### 5. Kiểm tra đầu cuối
+
+- Sửa quota/lịch trên dashboard, kiểm tra policy mới ở Tray.
+- Chặn `example.com`, thử `Resolve-DnsName example.com -Server 127.0.0.1 -DnsOnly`; xác nhận NXDOMAIN và sự kiện chặn.
+- Mở `/reports` để xem báo cáo; mở **Hôm nay / quyền riêng tư** trên Tray để xem dữ liệu dành cho trẻ.
+- Gửi yêu cầu thêm giờ từ Tray, duyệt trên dashboard và kiểm tra phản hồi.
+
+Các bước trên là hướng dẫn kiểm tra, không phải bằng chứng đã nghiệm thu trên mọi máy.
+
+## Tài liệu và cấu trúc
+
+| Vị trí | Nội dung |
+| --- | --- |
+| [agent/README.md](agent/README.md) | Cài/gỡ service, cấu hình, DNS, xử lý lỗi |
+| [server/README.md](server/README.md) | Server/dashboard, HTTPS, migration, backup, Docker |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Thành phần, giao thức, thời gian, dữ liệu và giới hạn |
+| [docs/DOMAIN_CATEGORIES.md](docs/DOMAIN_CATEGORIES.md) | Nguồn, phạm vi và dữ liệu kiểm thử domain |
+| [docs/PRIVACY.md](docs/PRIVACY.md) | Bảng dữ liệu – mục đích – thời hạn – người xem |
+| [docs/PRIVACY_CHILD.md](docs/PRIVACY_CHILD.md) | Giải thích quyền riêng tư dành cho trẻ |
+| [docs/THREATMODEL.md](docs/THREATMODEL.md) | STRIDE và checklist bảo mật |
+| [docs/AI_USAGE.md](docs/AI_USAGE.md) | Khai báo sử dụng và kiểm chứng AI |
+
+Dashboard nằm trong `server/dashboard/`, không cần build frontend riêng. Test nằm trong `server/tests/`, `agent/tests/` và `server/dashboard/tests/`. Dataset nộp kèm là `server/app/data/domain_categories.csv`.
+
+## Kiểm thử
+
+Tại thư mục gốc, sau khi cài `requirement.txt`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest agent/tests -q
+node --test server/dashboard/tests/*.test.mjs
+cd server
+..\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+Kết quả đã ghi nhận ngày 20/10/2026: server 76 passed, agent 114 passed/21 skipped, dashboard 14 passed. Skipped không được tính đạt. Cài service/DNS/ACL/Tray thực, SafeSearch trên browser và các phép đo mạng cần nghiệm thu riêng.
+
+## Phạm vi nộp và sử dụng
+
+Chỉ sử dụng với sự đồng ý hợp lệ trên máy được phép quản lý; không dùng theo dõi bí mật. DNS filtering không bảo đảm ngăn mọi VPN, DoH hoặc truy cập IP trực tiếp. Máy offline phải kết nối lại để hoàn tất xóa dữ liệu cục bộ. DNS miễn chặn không bảo đảm truy cập website khi desktop đang khóa.
+
+Đề còn yêu cầu `docs/BaoCao.docx`, `docs/BaoCaoKyThuatMang.pdf` (M1–M6), evidence kiểm thử và `demo/video.mp4`. Các tài liệu kỹ thuật trong repository không thay thế các sản phẩm này; không coi chúng đã hoàn thành khi chưa có tệp và phép đo thực tế.

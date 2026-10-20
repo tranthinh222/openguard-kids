@@ -1,4 +1,4 @@
-﻿# Quyền riêng tư — OpenGuard Kids
+# Quyền riêng tư — OpenGuard Kids
 
 Phiên bản 1.1, đối chiếu source 20/10/2026. Đây là mô tả kỹ thuật, không phải chứng nhận pháp lý hoặc evidence nghiệm thu Windows.
 Bản dành cho trẻ: [PRIVACY_CHILD.md](PRIVACY_CHILD.md).
@@ -53,4 +53,4 @@ Tray hiển thị usage, hoạt động, policy và audit. API giới hạn mỗ
 Nút Xóa toàn bộ dữ liệu xóa hồ sơ và dữ liệu FK liên quan trên server trong một transaction. Receipt hash tối thiểu cho phép máy offline nhận yêu cầu sau đó. Agent dừng collectors trước khi xóa cache/queue/usage/policy/clock; mất ACK thì retry mà không thu thập lại. Không thể xác nhận máy offline đã xóa ngay cùng thời điểm server.
 State vận hành không tự hết hạn sau 90 ngày nếu vẫn cần cho policy, chống lặp hoặc khôi phục mạng. Cleanup activity dùng giờ đã xác minh. Backup, CSV tải xuống, OS logs và bản sao ngoài ứng dụng cần quy trình xóa riêng. SQLite secure-delete/VACUUM không chứng minh xóa vật lý mọi byte trên SSD/backup.
 
-Chi tiết khóa, migration và giới hạn: [FINAL_CONTROLS.md](FINAL_CONTROLS.md).
+Chi tiết khóa, migration và giới hạn: [hướng dẫn server](../server/README.md) và [hướng dẫn agent](../agent/README.md).

@@ -1,88 +1,79 @@
-# Kiến trúc OpenGuard Kids
+﻿# Kiến trúc OpenGuard Kids
 
-Tài liệu này chốt kiến trúc tổng thể của nhóm theo mục 4 trong đề bài. Phần
-"Phạm vi chạy được cuối tuần 1" mô tả khung cần demo; các chức năng còn lại
-được hoàn thiện trong tuần 2–4.
-
-## Sơ đồ tổng thể
+## Thành phần và biên tin cậy
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "20px"}, "flowchart": {"nodeSpacing": 45, "rankSpacing": 55}}}%%
-flowchart TB
-    subgraph parentSide ["THIẾT BỊ PHỤ HUYNH"]
-        direction LR
-        dashboard["Dashboard Web"]
-        parentFeatures["Đăng nhập - Cấu hình - Báo cáo"]
-        dashboard --- parentFeatures
-    end
-
-    subgraph serverSide ["MÁY CHỦ - LAN HOẶC VPS LAB"]
-        direction LR
-        api["OGK Server - FastAPI"]
-        serverDatabase[("Server SQLite")]
-        api <-->|"SQLAlchemy"| serverDatabase
-    end
-
-    subgraph childMachine ["MÁY CỦA TRẺ - WINDOWS 10/11"]
-        direction LR
-        trayUi["Tray UI"]
-        agentService["OGK Agent Service"]
-        localDatabase[("Local SQLite")]
-        trayUi <-->|"Named pipe hoặc localhost"| agentService
-        agentService <-->|"Policy cache và event queue"| localDatabase
-    end
-
-    dashboard <-->|"HTTPS"| api
-    api <-->|"HTTPS TLS 1.2+: enrollment, heartbeat, policy, events"| agentService
-    api <-->|"WebSocket: lệnh khẩn dưới 5 giây"| agentService
+flowchart LR
+    Parent[Dashboard phụ huynh] <-->|HTTPS| Server[FastAPI Server]
+    Server <--> DB[(SQLite server)]
+    Server <-->|HTTPS / WSS| Service[Windows Service - LocalSystem]
+    Service <--> Local[(SQLite và state trong ProgramData)]
+    Tray[Tray - phiên người dùng] <-->|Named pipe có DACL| Service
+    Browser[Browser / ứng dụng] -->|DNS| Proxy[DNS proxy loopback:53]
+    Proxy --> Service
+    Proxy -->|Truy vấn được phép| Upstream[DNS upstream]
 ```
 
-## Phạm vi chạy được cuối tuần 1
+Dashboard nằm trong `server/dashboard/`; service và Tray thuộc `agent/`. Service thực thi policy, đếm usage, giám sát process, phục vụ DNS, đồng bộ sự kiện và lệnh. Tray giải thích trạng thái và gửi yêu cầu qua IPC, không sở hữu token server. User thường không được sửa thư mục dữ liệu/source hoặc quản trị service.
 
-```mermaid
-sequenceDiagram
-    participant Parent as Phụ huynh
-    participant Dashboard as Dashboard
-    participant Server as FastAPI Server
-    participant Agent as Windows Agent
+Watchdog xác minh Tray do nó khởi chạy và trạng thái icon. Nếu không thể xác nhận icon trong 30 giây ở desktop đang đăng nhập, runtime dừng và phục hồi mạng; không duy trì bảo vệ ẩn. Cần nghiệm thu hành vi SCM/ACL/desktop trên Windows thật.
 
-    Parent->>Dashboard: Đăng nhập
-    Dashboard->>Server: Gửi thông tin đăng nhập
-    Server-->>Dashboard: Trả phiên đăng nhập
-    Parent->>Dashboard: Tạo mã ghép đôi
-    Dashboard->>Server: Yêu cầu mã cho trẻ
-    Server-->>Dashboard: Trả mã 8 ký tự, hạn 10 phút
-    Agent->>Server: Enroll với mã và fingerprint
-    Server-->>Agent: Trả device_id, access token, refresh token
-    loop Mỗi 60 giây
-        Agent->>Server: Gửi trạng thái, quota, policy_version
-        Server-->>Agent: Trả policy_version mới nhất và lệnh chờ
-    end
-```
+## Giao thức và vòng đời
 
-## Trách nhiệm các thành phần
+| Luồng | Hành vi |
+| --- | --- |
+| Ghép đôi | Parent xác nhận notice, tạo mã 8 ký tự có TTL 10 phút; server giữ hash, claim một lần; trả device/access/refresh token |
+| Heartbeat | Mặc định 60 giây, gửi trạng thái/usage/policy version; nhận giờ server và lệnh chờ |
+| Policy | Có version và HMAC-SHA256; WebSocket thông báo policy mới, heartbeat fallback; agent xác minh rồi lưu bản tốt gần nhất |
+| Command | WebSocket gửi nhanh; pending/sent được gửi lại cùng ID khi reconnect/heartbeat tới khi ACK terminal |
+| Event | UUID event ID → SQLite outbox → batch upload → ACK từng event → xóa/đánh dấu đã gửi; chỉ xử lý các ID được ACK |
+| Yêu cầu trẻ | Xin thêm giờ hoặc báo chặn nhầm → parent quyết định/lời nhắn → command phản hồi; sửa rule là thao tác riêng |
+| Xóa dữ liệu | Xóa hồ sơ server → receipt hash → agent reconnect, dừng collectors, wipe và ACK; mất ACK chỉ retry, không thu thập lại |
 
-| Thành phần | Trách nhiệm |
-|---|---|
-| Agent Service | Áp dụng policy, đếm thời gian, kiểm soát ứng dụng, lọc DNS và đệm sự kiện khi mất mạng |
-| Tray UI | Minh bạch với trẻ, hiển thị thời gian/lý do chặn và gửi yêu cầu tới phụ huynh |
-| Local SQLite | Lưu policy gần nhất và hàng đợi sự kiện ngoại tuyến |
-| FastAPI Server | Xác thực, enrollment, quản lý trẻ/thiết bị, phát hành policy, nhận heartbeat/sự kiện và ghi audit |
-| Server SQLite | Lưu policy, sự kiện, thiết bị, token, lệnh và audit log |
-| Dashboard | Đăng nhập, tạo mã ghép đôi, cấu hình quota/lịch/danh sách chặn và xem báo cáo |
+WebSocket dùng TCP nhưng vẫn cần ACK ứng dụng: đứt kết nối không cho biết chắc agent đã thực thi hay chưa. Server cung cấp giao hàng ít nhất một lần; agent dùng ID và transaction cục bộ để chống chạy lặp. Mục tiêu đề bài là policy dưới 60 giây và lệnh khẩn dưới 5 giây; cần đo thực tế, không suy ra từ việc dùng WebSocket.
 
-## Quyết định giao tiếp
+## Thiết kế dữ liệu
 
-- Dashboard và agent gọi server qua HTTPS; bản triển khai chính thức yêu cầu TLS 1.2+.
-- Agent gửi heartbeat mỗi 60 giây.
-- Lệnh khẩn sử dụng WebSocket và phải đến agent trong vòng 5 giây.
-- Tray UI giao tiếp với Agent Service bằng named pipe `\\.\pipe\OpenGuardKids` có DACL riêng
-  (Week 04, `agent/WEEK04.md`); Tray không giữ token hay database, đóng Tray không dừng bảo vệ.
-- Khi ngoại tuyến, agent tiếp tục dùng policy cache, đếm giờ và đệm sự kiện để đồng bộ lại theo lô.
-- Policy có phiên bản và chữ ký toàn vẹn; agent từ chối policy bị sửa đổi.
+| Nhóm | Entity/trạng thái chính |
+| --- | --- |
+| Tài khoản | User, WebSession; parent, child-view, admin |
+| Trẻ và thiết bị | Child, Device, Enrollment; một parent có nhiều trẻ, mỗi trẻ nhiều thiết bị |
+| Chính sách/điều khiển | Policy, ChildRequest, DeviceCommand, PolicyAudit, ControlAudit |
+| Hoạt động | ActivityEvent, ScreenUsageDaily |
+| Xóa dữ liệu | ErasureJob độc lập hồ sơ đã xóa, chỉ giữ receipt/token hash tới ACK |
+| Agent local | Policy cache, UsageDaily, Event outbox, ProcessedCommand, AppUsageDaily, clock anchor và grace state |
 
-## Quyết định còn phải chốt
+Activity chứa loại sự kiện, subject đã tối thiểu hóa, thời điểm, duration, device/child/policy ID và event ID chống trùng. Server giữ `occurred_at`, `received_at`, `effective_at`, `clock_trusted` để phân biệt giờ agent và giờ dùng báo cáo. Xem [bảng quyền riêng tư](PRIVACY.md) cho mục đích, quyền xem và retention.
 
-Nhóm phải quyết định số ngày `N` và lựa chọn fail-open hay fail-closed khi policy
-hết hạn do máy trẻ mất kết nối dài ngày. Quyết định này cần được giải thích trong
-báo cáo và khi vấn đáp.
+AES-GCM mã hóa các trường định danh nhạy cảm, phản hồi, command payload và control audit; email lookup bằng HMAC. Đây không phải mã hóa toàn DB. Agent state chứa token được AES-GCM bảo vệ, khóa Windows được DPAPI bọc. ACL hạn chế SYSTEM/Administrators. Khóa server nằm ngoài source và phải được giữ qua migration/backup restore.
+
+## Thời gian và ngoại tuyến
+
+- Wall clock agent không phải nguồn tin cậy để cấp quota. Server UTC là mốc tham chiếu; monotonic đo elapsed usage.
+- Heartbeat đối chiếu clock, mặc định ngưỡng 120 giây. Clock lệch vẫn có thể nhận HTTP 200 để lấy giờ server; request hợp lệ không đồng nghĩa clock được tin cậy.
+- Anchor + monotonic dùng cho ngày quota/lịch. Restart trong cùng boot có thể khôi phục anchor; sau reboot offline mặc định `OGK_OFFLINE_CLOCK=strict` chờ xác minh. Policy cache chưa có giờ tin cậy có khoảng chờ khởi tạo tối đa 30 giây trước khóa; lệnh khóa lưu trước đó có thể áp dụng ngay.
+- Usage, grace và command IDs được lưu để restart không cấp thêm giờ hay thực thi lệnh hai lần.
+- `OGK_POLICY_OFFLINE_DAYS=7`: quá hạn heartbeat thì khóa screen-time tới khi reconnect, vẫn giữ bộ lọc theo policy đã xác minh. Đây là fail-closed cho screen-time.
+- Mất mạng trong khi có anchor hợp lệ: tiếp tục đếm thời gian, áp policy, lưu event và retry sau. Clock không tin cậy có thể trì hoãn cleanup cục bộ thay vì xóa sai dữ liệu.
+
+Kiểm tra chỉnh giờ phải dùng server có đồng hồ độc lập; Docker trên cùng host thường không tạo một đồng hồ độc lập để thử kiểu này. Đo quota trước/sau chỉnh giờ, quan sát drift và kiểm tra restart/reboot; khôi phục giờ sau thử nghiệm.
+
+## Kiểm soát ứng dụng và DNS
+
+Process monitor lấy executable name/path để xác định ứng dụng, cache SHA-256 và match hash trước tên. Đổi tên executable không đổi hash của cùng nội dung file. App duration là vòng đời process, chưa phải foreground activity; nhiều process đồng thời khiến tổng app duration khác screen time. Không lấy window title hay nội dung tài liệu.
+
+DNS proxy kiểm tra safety exemptions trước policy; sau đó `explicit allow > explicit block > category > default allow`. Bộ phân loại có sáu nhóm và dữ liệu nộp kèm tại [DOMAIN_CATEGORIES.md](DOMAIN_CATEGORIES.md). SafeSearch rewrite DNS cho engine hỗ trợ, không giải mã HTTPS. Telemetry dùng registrable domain, không URL đầy đủ; exemption trợ giúp không sinh activity.
+
+Kết nối HTTPS đang mở không bị chấm dứt khi rule DNS thay đổi. Browser cache, DoH/DoT, VPN và IP trực tiếp có thể tránh proxy. Network guard quản lý DNS/firewall/browser và backup trước thay đổi; lúc dừng phục hồi cấu hình cũ. Không khẳng định ngăn mọi bypass.
+
+## Giới hạn và nghiệm thu
+
+Các sơ đồ Mermaid bổ trợ nằm trong [diagrams/](diagrams/): luồng service/Tray,
+policy, command, screen-time và clock. Đây là sơ đồ từng cơ chế, cần đọc cùng
+vòng đời và giới hạn trong tài liệu này.
+
+SQLite phù hợp deployment nhỏ; WebSocket manager/rate limit trong memory cần một worker. Dataset tĩnh cần rà soát. Tài khoản administrator, Safe Mode, boot USB hoặc OS bị chiếm không nằm trong bảo đảm chống sửa cục bộ.
+
+DNS miễn chặn `tongdai111.vn`, `moet.gov.vn` và các cổng trường được cấu hình; điều này không tự cho phép duyệt web khi desktop khóa. Khả năng gọi/truy cập trợ giúp khẩn cấp trên thiết bị thực phải kiểm chứng riêng. Agent offline chưa thể xác nhận xóa dữ liệu; backup ngoài hệ thống không tự bị xóa.
+
+Phụ lục kỹ thuật nộp riêng cần đủ M1–M6: luồng gói có capture; so sánh hosts/DNS/proxy/WFP; ít nhất bảy bypass kèm kết quả thật; CPU/RAM/DNS p50-p95/policy latency với tối thiểu 30 mẫu; mất mạng/server/agent và thời gian phục hồi; đồng bộ thời gian. Tài liệu này giải thích thiết kế, không thay phép đo và evidence.

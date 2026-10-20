@@ -1,139 +1,119 @@
-# Openguard Kids Server
+﻿# OpenGuard Kids Server
 
-## Week 04 — source server
+FastAPI phục vụ API và dashboard Jinja2/JavaScript trong `server/dashboard/`; không cần Node.js hay build frontend để chạy. SQLite/SQLAlchemy lưu dữ liệu, Alembic quản lý schema. Hướng dẫn đầu cuối: [README gốc](../README.md).
 
-Phạm vi gồm API, pipeline dữ liệu, dashboard và công cụ vận hành trong `server/`.
-Không thay agent. Security/functional evidence, final report và demo script là
-các bước riêng thực hiện sau; unit/regression tests trong source không thay thế
-nghiệm thu thực tế.
+## Cài đặt
 
-### Cài đặt và khởi động
-
-Từ thư mục `server/`, Python 3.13 hoặc 3.14:
+Cần Python 3.13 và pip; SQLite đi kèm Python. Tại thư mục gốc source:
 
 ```powershell
-..\.venv\Scripts\python.exe -m pip install -r requirements.txt
-..\.venv\Scripts\python.exe -m alembic upgrade head
-..\.venv\Scripts\python.exe -m app.maintenance check
-..\.venv\Scripts\python.exe -m app.start
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r server/requirements.txt
+if (!(Test-Path server/.env)) { Copy-Item server/.env.example server/.env }
 ```
 
-Schema tiếp tục dùng migration Week 03, không thêm bảng tuần 4. Runner kiểm tra
-revision trước khi phục vụ; không tự migrate/reset dữ liệu. `GET /health` là
-liveness; `GET /ready` kiểm tra kết nối DB và revision, trả 503 khi chưa sẵn sàng.
-Development có thể tiếp tục dùng `uvicorn app.main:app --reload` như trước.
+Bỏ bước tạo venv nếu đã có. Điền `JWT_SECRET`, `POLICY_HMAC_SECRET` và `DATA_ENCRYPTION_KEY` theo [README gốc](../README.md). Không khởi động với placeholder. Khóa AES là base64 của 32 byte ngẫu nhiên, tạo một lần và sao lưu; mất khóa sẽ không đọc được dữ liệu đã mã hóa.
 
-Ứng dụng đọc `.env` ở **thư mục gốc project** như các tuần trước. File
-[`server/.env.example`](.env.example) là mẫu biến process/container, không được
-autoload như `.env` thứ hai. Biến môi trường của process ưu tiên hơn root `.env`.
+Server tự đọc `server/.env`; biến môi trường process ưu tiên hơn file. Chạy lệnh bên dưới từ `server/` để SQLite tương đối luôn trỏ đúng database:
 
-`ENVIRONMENT=production` hoặc `staging` bắt buộc:
+```powershell
+cd server
+..\.venv\Scripts\python.exe -m alembic upgrade head
+..\.venv\Scripts\python.exe -m app.maintenance check
+..\.venv\Scripts\python.exe -m app.seed --email demo@example.com --demo-child
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
-- `JWT_SECRET` và `POLICY_HMAC_SECRET` khác nhau, tối thiểu 32 ký tự, không dùng
-  giá trị mẫu. Secret policy phải trùng cấu hình agent; đừng đổi secret tùy tiện
-  trên DB đang dùng vì policy lịch sử vẫn có chữ ký cũ.
-- `WEB_COOKIE_SECURE=true`; dashboard phục vụ HTTPS qua reverse proxy.
-- `ALLOWED_HOSTS` là JSON array hostname thực tế, không dùng `*`.
-- Chỉ tin proxy IP thực tế qua `FORWARDED_ALLOW_IPS`; không đặt `*` trên server
-  có thể được truy cập trực tiếp. WebSocket proxy cần hỗ trợ Upgrade và idle timeout
-  phù hợp. `HOST`, `PORT`, `LOG_LEVEL` điều khiển runner.
+Seed hỏi mật khẩu, không ghi log hay đặt mật khẩu mặc định. Đăng nhập `/login` bằng `demo@example.com` và mật khẩu đã nhập. `--demo-child` chỉ dùng development/test, tạo hồ sơ demo chưa ghép thiết bị. Tài khoản đã tồn tại không bị ghi đè. Cũng có thể đăng ký phụ huynh qua `/register`.
 
-Runner dùng **một worker**: registry WebSocket và rate limiter hiện ở bộ nhớ của
-process. Muốn nhiều worker/replica cần shared pub/sub và shared rate limiter.
-HTTP access log mặc định tắt để tránh ghi URL/query ngoài ý muốn; lỗi có request ID
-và loại exception, không ghi payload/token/password hay SQL parameters.
+Nếu cần phục vụ máy khác trong LAN, đổi host thành `0.0.0.0` và cho phép TCP 8000 qua firewall. `/health` kiểm tra process; `/ready` kiểm tra DB/revision. Runner `python -m app.start` kiểm tra schema trước khi chạy; không tự migrate hay reset.
 
-### Giới hạn và contract
+## Cấu hình và HTTPS
 
-- HTTP body tối đa `MAX_REQUEST_BYTES` (mặc định 1 MiB), kể cả chunked request.
-  Reverse proxy cũng nên giới hạn body và timeout cho slow clients.
-- Rate limit theo IP kết nối: POST auth/enroll/refresh 30 lần/phút, API khác
-  600 lần/phút; cấu hình `AUTH_REQUESTS_PER_MINUTE`, `API_REQUESTS_PER_MINUTE`.
-  Vượt hạn trả 429 + `Retry-After`. Nhiều thiết bị chung NAT chia sẻ hạn mức;
-  điều chỉnh cho deployment, không dùng tắt limiter để xử lý tải production.
-- Dashboard cookie writes bao gồm tạo mã ghép đôi yêu cầu CSRF. Bearer API vẫn
-  tương thích. JWT bắt buộc có sub/type/iat/exp. API write từ chối field lạ và
-  một số kiểu dữ liệu coercion như boolean thay cho số phút.
-- `agent_wall_clock` nếu gửi phải có timezone. `server_time` luôn từ server;
-  `clock_drift_sec = agent_wall_clock - server_time`. Thiếu wall clock trả drift
-  null và clock_trusted false. Event sau heartbeat gần đây thiếu/sai clock dùng
-  received_at và clock_trusted false. Event offline không có heartbeat mới vẫn
-  được kiểm tra timestamp theo cửa sổ Week 03; đây là kiểm tra hợp lý, không phải
-  xác thực lịch sử offline bằng trusted anchor. Chưa thêm giao thức clock mới
-  đòi sửa agent.
-- `occurred_at` giữ thời điểm agent, `received_at` là lúc server nhận,
-  `effective_at` dùng cho report. Các response command/request/enrollment trả
-  timestamp có UTC timezone để browser không hiểu nhầm là giờ local.
-- Mã ghép đôi được claim bằng SQL compare-and-set. Quyết định yêu cầu và tạo
-  command nằm trong cùng transaction; hai lần duyệt không tạo hai ADD_TIME.
-  Policy update đụng version trả 409 để reload, không lộ lỗi constraint.
-- Pending/sent commands vẫn được resend cùng ID khi heartbeat/reconnect; ACK
-  terminal đầu tiên giữ nguyên. Đây là at-least-once, agent vẫn phải deduplicate.
-- WebSocket kiểm tra lại expiry/revocation mỗi `WEBSOCKET_AUTH_INTERVAL_SEC`
-  (mặc định 30 giây) và trước nhận ACK; đóng bằng 4401 để agent refresh/reconnect.
-  Tối đa 3 socket/device, 120 message/phút/socket, payload 4096 byte mặc định.
-  ACK JSON/schema sai hoặc command không thuộc thiết bị đóng 1008.
+| Biến | Vai trò |
+| --- | --- |
+| `ENVIRONMENT` | development/test/staging/production |
+| `DATABASE_URL` | Mặc định `sqlite:///./data/openguard.db` khi chạy từ server/ |
+| `JWT_SECRET` | Secret JWT, khác secret policy |
+| `POLICY_HMAC_SECRET` | Ký policy; trùng `OGK_POLICY_HMAC_SECRET` phía agent |
+| `DATA_ENCRYPTION_KEY` | AES-GCM cho trường nhạy cảm và email lookup |
+| `WEB_COOKIE_SECURE` | false chỉ cho HTTP lab, true khi HTTPS |
+| `ALLOWED_HOSTS` | JSON array hostname được phép |
+| `REPORT_TIMEZONE_OFFSET_MINUTES` | Mặc định 420, thống nhất với agent |
+| `AGENT_CLOCK_DRIFT_THRESHOLD_SEC` | Mặc định 120 giây |
+| `RETENTION_INTERVAL_SEC` | Chu kỳ cleanup, mặc định 86400; không phải tuổi dữ liệu |
 
-### Retention và báo cáo
+Production/staging yêu cầu secret thực ít nhất 32 ký tự, khóa mã hóa hợp lệ, secure cookie và host cụ thể. Chỉ triển khai **một worker** vì WebSocket registry và rate limiter hiện nằm trong bộ nhớ process.
 
-Cleanup chạy khi server khởi động rồi mỗi `RETENTION_INTERVAL_SEC` (86400), lỗi
-retry sau `RETENTION_RETRY_SEC` (3600). Activity events, screen usage và policy
-audit giữ cửa sổ 90 ngày như Week 03. Cleanup xóa thêm session/refresh token hết
-hạn hoặc bị revoke, enrollment code đã dùng/hết hạn quá 1 ngày. Không xóa pending
-commands hoặc policy versions đang làm tham chiếu. Có thể chạy thủ công:
+Dùng HTTPS reverse proxy có TLS ≥1.2, chứng chỉ hợp lệ và hỗ trợ WebSocket Upgrade. Chỉ tin IP proxy thực tế qua `FORWARDED_ALLOW_IPS`; không dùng wildcard khi server truy cập trực tiếp được. Agent cần `OGK_TLS_CERT_SHA256` lấy từ chứng chỉ DER đã xác minh và CA PEM nếu CA nội bộ. Khi đổi chứng chỉ, cập nhật pin trước khi kết nối lại.
+
+Có thể chạy TLS trực tiếp trong lab với chứng chỉ/khóa riêng đã chuẩn bị:
+
+```powershell
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-certfile C:/certs/server.pem --ssl-keyfile C:/certs/server-key.pem
+```
+
+Tên host trong URL phải khớp SAN của chứng chỉ. Không thay HTTPS bằng HTTP để tuyên bố đạt yêu cầu bảo mật. `HOST`, `PORT`, `FORWARDED_ALLOW_IPS` của runner được đọc từ môi trường process; nếu cần hãy đặt `$env:HOST`, `$env:PORT` trong PowerShell hoặc truyền tham số Uvicorn như trên.
+
+## Dashboard và phân quyền
+
+- `/dashboard`, `/children`: tổng quan, hồ sơ, thiết bị và consent trước ghép đôi.
+- `/policies`: quota ngày thường/cuối tuần, lịch 7×48, rule ứng dụng/domain, category và SafeSearch.
+- `/requests`: thêm giờ và báo chặn nhầm; ghi nhận báo chặn nhầm không tự đổi rule.
+- `/reports`: screen time, top apps/domains, số lần chặn, khoảng ngày và CSV.
+- Tray đọc transparency: báo cáo, policy, lịch sử và quyền riêng tư.
+
+Parent chỉ thao tác trên trẻ thuộc mình. Child-view chỉ đọc, gắn với device/child; parent cấp token 15 phút qua `POST /api/v1/children/{child}/devices/{device}/child-view-token`. Admin chỉ thống kê vận hành, không tự có quyền xem hồ sơ trẻ của parent khác. Provision admin qua CLI:
+
+```powershell
+..\.venv\Scripts\python.exe -m app.seed --email operator@example.com --role admin
+```
+
+Admin lấy bearer token ở `/api/v1/auth/token`, đọc `/api/v1/admin/summary`. Không có dashboard admin riêng. Cookie writes yêu cầu CSRF; API bearer kiểm tra loại token và quyền sở hữu.
+
+## Đồng bộ và dữ liệu
+
+Policy version/HMAC được đẩy qua WebSocket; heartbeat mặc định 60 giây là fallback. Command pending/sent được gửi lại cùng ID tới khi ACK terminal; agent chống thực thi trùng. Sự kiện upload theo batch, ACK từng event; retry không tạo bản ghi trùng. Xem [kiến trúc](../docs/ARCHITECTURE.md).
+
+Báo cáo dùng `effective_at`, timezone cấu hình và khoảng ngày tối đa 90 ngày. Screen time lấy usage tổng hợp từ heartbeat; tổng app duration có thể lớn hơn do nhiều process cùng chạy. Không cộng app duration để thay screen time.
+
+Cleanup chạy lúc khởi động và theo chu kỳ, retry lỗi sau `RETENTION_RETRY_SEC`. Activity, usage, policy/control audit, request và command có retention 90 ngày; token/session/enrollment có vòng đời riêng. Policy/state đang làm tham chiếu và receipt chưa ACK không bị coi là lịch sử thông thường. Chạy thủ công:
 
 ```powershell
 ..\.venv\Scripts\python.exe -m app.maintenance cleanup
 ```
 
-Report dùng timezone server `REPORT_TIMEZONE_OFFSET_MINUTES` (420), khoảng ngày
-inclusive tối đa 90 ngày. Screen time là daily max heartbeat theo device; app
-usage cộng app_stop, không thay thế screen time. UI giữ dữ liệu cũ khi polling
-lỗi, báo trạng thái stale; ngăn khoảng ngày không hợp lệ và thao tác duyệt/từ chối
-đồng thời. `ASSET_VERSION` version hóa entry, CSS và JS import graph bằng import
-map; static responses yêu cầu revalidation. Đổi version khi phát hành source mới.
+Xóa hồ sơ cascade dữ liệu server, giữ receipt chỉ chứa token hash để agent reconnect nhận yêu cầu xóa. Agent dừng thu thập, xóa cache rồi ACK; offline chưa thể xác nhận xóa ngay. Backup/CSV bên ngoài phải xử lý riêng. Xem [PRIVACY.md](../docs/PRIVACY.md).
 
-### Backup, phục hồi và reset dữ liệu demo
+## Nâng cấp, sao lưu và phục hồi
 
-Không copy riêng file SQLite trong lúc server đang ghi WAL. Công cụ backup dùng
-SQLite backup API để lấy snapshot gồm dữ liệu đã commit, kiểm tra integrity và
-foreign keys, từ chối ghi đè file backup có sẵn:
+Giữ nguyên khóa AES và secret policy. Trước nâng cấp, tạo backup bằng SQLite backup API; không copy riêng DB đang ghi WAL:
 
 ```powershell
 ..\.venv\Scripts\python.exe -m app.maintenance backup --output ../backups/openguard-before-update.db
 ..\.venv\Scripts\python.exe -m app.maintenance verify-backup ../backups/openguard-before-update.db
 ```
 
-Đặt backup ngoài public/static, giới hạn quyền truy cập thư mục bằng ACL trên
-Windows hoặc permission trên Linux; backup chứa dữ liệu trẻ và token đã hash.
+Sau đó dừng server, chạy `alembic upgrade head`, `app.maintenance check` và khởi động lại. Migration mã hóa dữ liệu cũ cần đúng `DATA_ENCRYPTION_KEY`; sao lưu khóa tách biệt và bảo vệ cả khóa lẫn DB. SQLite ≥3.35 cần cho thao tác downgrade bỏ cột trực tiếp. Không downgrade trên dữ liệu thật để thử nghiệm.
 
-Phục hồi: dừng server, verify backup, **copy backup sang tên file mới** trong thư
-mục data; giữ file DB cũ và sidecar để rollback. Trỏ `DATABASE_URL` tới bản copy,
-chạy `alembic upgrade head`, `app.maintenance check`, rồi khởi động lại. Không thay
-DB khi process đang chạy và không dùng lại WAL/SHM của DB cũ với bản phục hồi.
+Phục hồi: dừng server, verify backup, copy sang **tên file mới**, trỏ `DATABASE_URL` vào bản copy rồi migrate/check. Giữ DB cũ để rollback; không ghép WAL/SHM cũ với DB phục hồi. Reset demo bằng database mới và seed lại, không xóa DB đang dùng.
 
-Reset demo: backup trước, dừng server, chọn một `DATABASE_URL` trỏ tới **file mới
-chưa tồn tại**, chạy migration và khởi động. Đây là DB rỗng; cần đăng ký/ghép đôi
-lại. Source không có HTTP reset endpoint hoặc thao tác tự xóa DB.
+## Docker (tùy chọn)
 
-### Docker
-
-Build context là `server/`, không copy agent hay root `.env`:
+Cần Docker Engine/Docker Desktop. Từ `server/`:
 
 ```powershell
 docker build -t openguard-server .
 docker volume create openguard-server-data
-docker run --rm --env-file .env.deploy -v openguard-server-data:/data openguard-server python -m alembic upgrade head
-docker run --rm --name openguard-server --env-file .env.deploy -v openguard-server-data:/data -p 127.0.0.1:8000:8000 openguard-server
+docker run --rm --env-file .env -e DATABASE_URL=sqlite:////data/openguard.db -v openguard-server-data:/data openguard-server python -m alembic upgrade head
+docker run --rm -it --env-file .env -e DATABASE_URL=sqlite:////data/openguard.db -v openguard-server-data:/data openguard-server python -m app.seed --email demo@example.com --demo-child
+docker run --rm --name openguard-server --env-file .env -e DATABASE_URL=sqlite:////data/openguard.db -v openguard-server-data:/data -p 127.0.0.1:8000:8000 openguard-server
 ```
 
-Tạo `.env.deploy` từ mẫu và điền secrets thật; không commit. Container chạy user
-không phải root. Dùng named volume mới sẽ nhận quyền `/data` từ image; bind mount
-cần cấp quyền UID 10001. Đặt HTTPS reverse proxy trước cổng 8000 khi chạy staging/
-production. ALLOWED_HOSTS phải chứa `127.0.0.1` nếu dùng healthcheck mặc định.
-Build/deploy Docker và restore drill cần xác minh trên môi trường triển khai riêng.
+Seed demo chỉ dùng development/test. Image không chứa `.env`, chạy user không phải root; bind mount cần quyền UID 10001. Mapping trên chỉ cho host truy cập; khi triển khai LAN/HTTPS cấu hình proxy hoặc publish phù hợp. Agent/DNS proxy vẫn chạy trên Windows, không nằm trong container server.
 
-## Week 03
+## Kiểm thử và giới hạn
 
-Xem [contract, migration và hướng dẫn kiểm thử Week 03](docs/WEEK03_CONTRACT.md).
-Các thay đổi Week 03 nằm hoàn toàn trong `server/`, gồm API và dashboard.
+Cài `requirement.txt` ở root để có pytest/httpx. Từ server/: `..\.venv\Scripts\python.exe -m pytest tests -q`. Test JavaScript dùng Node.js 24 từ root: `node --test server/dashboard/tests/*.test.mjs`.
+
+Giới hạn gồm SQLite cho deployment nhỏ, WebSocket/rate limit một process, dataset tĩnh và DNS bypass. Chưa có số đo bảo đảm latency hay hiệu năng trên mọi môi trường. Test tự động không thay thế nghiệm thu HTTPS, backup restore, Windows và bộ đo M1–M6.

@@ -1,14 +1,14 @@
 # Dataset phân loại tên miền — phiên bản 2
 
-Cập nhật ngày 20/10/2026. Nguồn dữ liệu duy nhất: [domain_categories.csv](../app/data/domain_categories.csv).
+Cập nhật ngày 20/10/2026. Nguồn dữ liệu duy nhất: [domain_categories.csv](../server/app/data/domain_categories.csv).
 API phụ huynh `/api/v1/domain-categories` và API agent `/api/v1/agent/domain-categories`
-cùng phục vụ bảng này qua [loader](../app/services/domain_categories.py).
+cùng phục vụ bảng này qua [loader](../server/app/services/domain_categories.py).
 CSV nằm trong `app/data` nên được đóng gói cùng Docker image hiện tại.
 
 ## Yêu cầu và số lượng
 
-Đối chiếu F3 trong đề `QuanLyMayTinhTreEm.md`: bảng phân loại tối thiểu **200 mục**, đủ
-6 nhóm. Đề không đặt tối thiểu riêng cho từng nhóm. Dataset cũ có 11 mục.
+Đối chiếu F2 trong đề `QuanLyMayTinhTreEm.md`: bảng phân loại tối thiểu **200 mục**, đủ
+6 nhóm. Đề không đặt tối thiểu riêng cho từng nhóm.
 
 | Nhóm | Số mục |
 | --- | ---: |
@@ -75,7 +75,7 @@ và xác nhận event/reason do proxy sinh ra.
 fixture an toàn. `agent/tests/test_category_dataset.py` đưa toàn bộ CSV qua matcher thật,
 kiểm tra domain/subdomain, ưu tiên allow và fallback unknown (không truy cập mạng).
 
-Đạt 200 mục **chưa đồng nghĩa** đạt nghiệm thu F3. Tiêu chí chặn ≥95% bộ 50 domain,
+Đạt 200 mục **chưa đồng nghĩa** đạt nghiệm thu F2. Tiêu chí chặn ≥95% bộ 50 domain,
 0 dương tính giả trên 20 domain giáo dục và policy mặc định độ tuổi cần evidence riêng.
 Phụ lục đề gợi ý 20/10/8/7/5/10 mục (tổng 60, có DoH và mô phỏng); không nhầm bảng gợi ý
 này với số lượng bắt buộc theo từng category hoặc kết quả test đã chạy.

@@ -37,7 +37,7 @@ DISPLAY_NAME = "OpenGuard Kids Protection"
 DESCRIPTION = ("Áp dụng giới hạn thời gian, chặn ứng dụng/tên miền theo chính sách phụ huynh. "
                "Biểu tượng khay hệ thống luôn hiển thị khi dịch vụ chạy.")
 LOGGER = logging.getLogger("openguard-agent.service")
-# Settings the protected env file carries over from the project .env at install time.
+# Settings the protected env file carries over from agent/.env at install time.
 CARRIED_SETTINGS = ("OGK_SERVER_URL", "OGK_POLICY_HMAC_SECRET", "OGK_HEARTBEAT_INTERVAL_SEC", "OGK_REQUEST_TIMEOUT_SEC",
                     "OGK_USAGE_TICK_SEC", "OGK_RELOCK_DELAY_SEC", "OGK_VERIFY_TLS", "OGK_APPS_ENABLED",
                     "OGK_TLS_CERT_SHA256", "OGK_TLS_CA_FILE",
@@ -148,7 +148,7 @@ def install(args) -> int:
         win32serviceutil.StartService(SERVICE_NAME)
         win32serviceutil.WaitForServiceStatus(SERVICE_NAME, win32service.SERVICE_RUNNING, 60)
     print(f"Đã cài {DISPLAY_NAME}. Dữ liệu và log: {data_dir()}")
-    project_env = AGENT_DIR.parent / ".env"
+    project_env = AGENT_DIR / ".env"
     if project_env.exists():
         print(f"Cấu hình đã được chép vào {data_dir() / 'agent.env'} (chỉ SYSTEM/Administrators đọc được). "
               f"Hãy xóa hoặc giới hạn quyền đọc {project_env} để tài khoản của trẻ không đọc được secret.")
