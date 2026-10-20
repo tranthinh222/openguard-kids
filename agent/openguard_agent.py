@@ -11,6 +11,7 @@ import os
 import platform
 import signal
 import socket
+import sqlite3
 import tempfile
 import threading
 import uuid
@@ -481,6 +482,34 @@ def build_parser() -> argparse.ArgumentParser:
     return result
 
 
+def data_dir_problem(config: AgentConfig) -> str | None:
+    """Explain, instead of a traceback, why this console cannot write the agent's data folder."""
+    folder = (config.database_path or config.state_path).parent
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        probe = folder / f".write-test-{os.getpid()}"
+        probe.write_bytes(b"")
+        probe.unlink()
+        return None
+    except OSError as exc:
+        return (f"Không ghi được thư mục dữ liệu {folder} ({exc.strerror or exc}). "
+                "Khi đã cài service, thư mục này chỉ SYSTEM và Administrators được ghi: "
+                "dùng service (mở giao diện bằng agent_gui.py) thay vì lệnh run, "
+                "hoặc mở PowerShell bằng 'Run as Administrator', "
+                "hoặc đặt OGK_STATE_PATH sang thư mục khác để thử nghiệm.")
+
+
+def service_running(config: AgentConfig) -> bool:
+    from service.ipc import IPCClient, IPCError, ServiceUnavailableError, default_address
+    try:
+        IPCClient(default_address(config.state_path), timeout=3).call("status")
+    except ServiceUnavailableError:
+        return False
+    except (IPCError, OSError):
+        pass  # Something answers on the address; it is not ours to start a second runtime on.
+    return True
+
+
 def run_forever(config: AgentConfig) -> int:
     """Console host for the same runtime the Windows Service uses (development, Linux, debugging)."""
     from service.runtime import build_console_runtime
@@ -521,6 +550,14 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     config = AgentConfig.from_env()
+    try:
+        return run_command(args, config)
+    except (PermissionError, sqlite3.OperationalError) as exc:
+        LOGGER.error("%s", data_dir_problem(config) or exc)
+        return 1
+
+
+def run_command(args: argparse.Namespace, config: AgentConfig) -> int:
     store = StateStore(config.state_path)
     if args.command == "status":
         state = store.load()
@@ -531,6 +568,14 @@ def main() -> int:
         print(json.dumps(safe, indent=2))
         return 0
     if args.command == "run":
+        if service_running(config):
+            LOGGER.error("Dịch vụ OpenGuard Kids đang chạy trên máy này; không cần lệnh run. "
+                         "Mở giao diện bằng agent_gui.py, xem trạng thái bằng openguard_service.py status.")
+            return 1
+        problem = data_dir_problem(config)
+        if problem:
+            LOGGER.error("%s", problem)
+            return 1
         return run_forever(config)
     if args.command == "enroll":
         from service.ipc import IPCError

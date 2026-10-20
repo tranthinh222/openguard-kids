@@ -13,4 +13,7 @@ htmlcov/
 
 QuanLyMayTinhTreEm.pdf
 .vscode/
-OpenGuard-Kids.pdf
+
+
+# Báo cáo kỹ thuật mạng (LaTeX, script đo, kết quả đo) — không commit
+docs/BaoCaoKyThuatMang/
