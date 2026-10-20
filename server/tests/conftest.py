@@ -12,6 +12,9 @@ from app.core.config import settings
 
 @pytest.fixture(autouse=True)
 def isolated_rate_limits(monkeypatch):
+    import base64
+    import os
+    monkeypatch.setattr(settings, "data_encryption_key", base64.b64encode(os.urandom(32)).decode())
     # Ordinary API tests aren't a single client issuing hundreds of requests per minute.
     # Limiter-specific tests explicitly enable it with their own application instance.
     monkeypatch.setattr(settings, 'rate_limit_enabled', False)

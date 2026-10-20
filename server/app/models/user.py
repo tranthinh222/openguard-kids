@@ -4,12 +4,14 @@ from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, uuid4_str
+from app.core.encrypted import EncryptedText
 
 class User(TimestampMixin, Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    email: Mapped[str] = mapped_column(EncryptedText("user.email", 320), unique=True, index=True, nullable=False)
+    email_lookup_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
 
     role: Mapped[str] = mapped_column(String(32), default="parent", nullable=False)

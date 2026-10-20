@@ -10,7 +10,7 @@ from test_week02 import parent_headers, enrolled_device
 def test_policy_push_reaches_all_connected_devices_with_signed_saved_policy(client):
     parent = parent_headers(client)
     child, first = enrolled_device(client, parent)
-    code = client.post(f"/api/v1/children/{child}/enrollment", headers=parent).json()["code"]
+    code = client.post(f"/api/v1/children/{child}/enrollment", json={"consent": True, "privacy_notice_version": "2026-10-20-v1"}, headers=parent).json()["code"]
     second = client.post("/api/v1/agent/enroll", json={
         "code": code, "device_name": "second", "fingerprint": "second-device",
     }).json()

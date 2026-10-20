@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ router = APIRouter()
 @router.post("", response_model=ChildResponse, status_code=status.HTTP_201_CREATED)
 def create(
     payload: ChildCreateRequest,
+    request: Request,
     parent: User = Depends(get_current_parent_for_write),
     db: Session = Depends(get_db),
 ):
@@ -26,6 +27,7 @@ def create(
         parent_id=parent.id,
         display_name=payload.display_name,
         birth_year=payload.birth_year,
+        source_ip=request.client.host if request.client else None,
     )
 
 
@@ -101,12 +103,14 @@ def get_child_policy(
 @router.put("/{child_id}/policy", response_model=PolicyResponse)
 async def update_child_policy(
     child_id: str,
+    request: Request,
     payload: PolicyUpdateRequest,
     parent: User = Depends(get_current_parent_for_write),
     db: Session = Depends(get_db),
 ):
     child = get_owned_child(db, parent.id, child_id)
 
-    policy = update_policy(db, child.id, payload.payload, actor_id=parent.id)
+    policy = update_policy(db, child.id, payload.payload, actor_id=parent.id,
+                           source_ip=request.client.host if request.client else None)
     await push_policy_update(db, policy)
     return policy

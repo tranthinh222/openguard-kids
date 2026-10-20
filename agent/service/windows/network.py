@@ -76,8 +76,9 @@ class PowerShellBackend:
             raise RuntimeError(completed.stderr.strip() or f"PowerShell exited with {completed.returncode}")
         return completed.stdout.strip()
 
-    def adapters(self) -> list[Adapter]:
-        raw = self.run("Get-NetAdapter | Where-Object Status -eq 'Up' | "
+    def adapters(self, include_disconnected=False) -> list[Adapter]:
+        filter_script = "" if include_disconnected else "Where-Object Status -eq 'Up' | "
+        raw = self.run("Get-NetAdapter | " + filter_script +
                        "Select-Object ifIndex,InterfaceGuid,Name | ConvertTo-Json -Compress")
         items = json.loads(raw) if raw else []
         items = [items] if isinstance(items, dict) else items
@@ -243,7 +244,9 @@ class NetworkGuard:
                         datetime.now(timezone.utc).isoformat()))
 
     def _restore_adapters(self) -> None:
-        live = {adapter.guid: adapter for adapter in self.backend.adapters()}
+        adapters = (self.backend.adapters(include_disconnected=True)
+                    if isinstance(self.backend, PowerShellBackend) else self.backend.adapters())
+        live = {adapter.guid: adapter for adapter in adapters}
         with sqlite3.connect(self.database, timeout=10) as db:
             rows = db.execute("SELECT guid, config FROM dns_adapter_backup").fetchall()
         for guid, raw in rows:
@@ -261,14 +264,15 @@ class NetworkGuard:
             self.backend.flush_cache()
 
     def _apply_browser_policies(self) -> None:
-        with sqlite3.connect(self.database, timeout=10) as db:
-            for path, name, value in BROWSER_POLICIES:
-                current = self.backend.read_policy(path, name)
-                if current == value:
-                    continue
+        for path, name, value in BROWSER_POLICIES:
+            current = self.backend.read_policy(path, name)
+            if current == value:
+                continue
+            with sqlite3.connect(self.database, timeout=10) as db:
                 db.execute("INSERT OR IGNORE INTO browser_policy_backup VALUES (?, ?, ?)",
                            (path, name, json.dumps(current)))
-                self.backend.write_policy(path, name, value)
+            # Commit the backup before touching the registry (including crash recovery).
+            self.backend.write_policy(path, name, value)
 
     def _restore_browser_policies(self) -> None:
         with sqlite3.connect(self.database, timeout=10) as db:

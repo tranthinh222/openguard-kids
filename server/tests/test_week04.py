@@ -69,6 +69,7 @@ def test_production_config_rejects_insecure_defaults():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, environment='production', jwt_secret='dev-only', policy_hmac_secret='dev-only')
     valid = Settings(_env_file=None, environment='production', jwt_secret='x' * 32,
+                     data_encryption_key='eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=',
                      policy_hmac_secret='y' * 32, web_cookie_secure=True, allowed_hosts=['example.com'])
     assert valid.web_cookie_secure
 
@@ -89,7 +90,7 @@ def test_cookie_enrollment_requires_csrf(client):
     child = client.post('/api/v1/children', json={'display_name': 'Test'}, headers=header).json()['id']
     url = f'/api/v1/children/{child}/enrollment'
     assert client.post(url).status_code == 403
-    assert client.post(url, headers=header).status_code == 201
+    assert client.post(url, headers=header, json={"consent": True, "privacy_notice_version": "2026-10-20-v1"}).status_code == 201
 
 
 def test_request_decision_is_one_transaction(client, db_session, monkeypatch):

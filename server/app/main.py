@@ -17,6 +17,8 @@ from app.web.routes import policies as web_policies
 from app.web.routes import requests as web_requests
 from app.web.routes import reports as web_reports
 from app.api.routes import activity
+from app.api.routes import privacy
+from app.api.routes import roles
 from app.api.deps import get_db
 from app.services.retention import retention_loop
 from app.core.http_security import SecurityMiddleware
@@ -71,6 +73,8 @@ app.include_router(agent.router, prefix="/api/v1/agent", tags=["Agent"])
 app.include_router(requests.router, prefix="/api/v1", tags=["Requests"])
 app.include_router(commands.router, prefix="/api/v1", tags=["Commands"])
 app.include_router(activity.router, prefix="/api/v1", tags=["Activity and Reports"])
+app.include_router(privacy.router, prefix="/api/v1", tags=["Privacy"])
+app.include_router(roles.router, prefix="/api/v1", tags=["Roles"])
 
 # Parent dashboard web UI
 app.include_router(web_auth.router, tags=["Web Auth"], include_in_schema=False)

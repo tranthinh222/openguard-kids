@@ -19,9 +19,11 @@ IDLE_REPORT_SEC = 5.0
 
 class ServiceLink:
     def __init__(self, client: IPCClient, post: Callable[[str, object], None],
-                 idle_probe: Callable[[], float] = idle_seconds, monotonic=time.monotonic):
+                 idle_probe: Callable[[], float] = idle_seconds, monotonic=time.monotonic,
+                 visible_probe=lambda: False):
         self.client, self.post, self.idle_probe, self.monotonic = client, post, idle_probe, monotonic
         self.cursor = -1
+        self.visible_probe = visible_probe
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._next_idle = 0.0
@@ -35,7 +37,7 @@ class ServiceLink:
 
     def poll_once(self) -> None:
         try:
-            status = self.client.call("status", tray=True)
+            status = self.client.call("status", tray=True, visible=bool(self.visible_probe()))
             batch = self.client.call("events", after=self.cursor)
             if batch["seq"] < self.cursor:
                 self.cursor = -1  # The service restarted; its numbering began again.

@@ -59,6 +59,13 @@ def sections(result, active_policy, usage=None):
     for item in data.get('audit', []):
         audits.append(f"{item['timestamp']}: phụ huynh đổi v{item['old_version']} → v{item['new_version']}\n"
                       + 'Trước:\n' + policy_text(item.get('old_payload')) + '\nSau:\n' + policy_text(item.get('new_payload')))
+    for item in data.get('control_audit', []):
+        labels = {'command_created': 'gửi lệnh', 'request_decided': 'phản hồi yêu cầu',
+                  'enrollment_consent': 'đồng ý ghép thiết bị', 'child_created': 'tạo hồ sơ',
+                  'device_enrolled': 'ghép thiết bị'}
+        audits.append(f"{item['timestamp']}: phụ huynh {labels.get(item['action'], item['action'])}"
+                      f"\nIP: {item.get('source_ip') or 'chưa ghi nhận'}"
+                      f"\nTrước: {item['old_value']}\nSau: {item['new_value']}")
     policy = (f'Đang áp dụng trên máy: v{active_policy.version}\n' + policy_text(active_policy.payload)
               if active_policy else 'Chưa nhận policy hợp lệ.')
     remote = data.get('policy', {})

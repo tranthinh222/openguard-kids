@@ -33,7 +33,7 @@ class FakeHandler:
 def test_websocket_url_and_ack():
     assert websocket_url("https://example.test") == "wss://example.test/api/v1/agent/ws"
     sockets = []
-    worker = WebSocketWorker("https://example.test", lambda: "token", FakeHandler())
+    worker = WebSocketWorker("https://example.test", lambda: "token", FakeHandler(), tls_cert_sha256="a" * 64)
 
     def connector(url, **kwargs):
         assert url == "wss://example.test/api/v1/agent/ws"

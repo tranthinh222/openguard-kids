@@ -33,11 +33,15 @@ class WebSocketWorker:
         connector=connect,
         on_auth_failure: Callable[[], None] | None = None,
         on_policy: Callable[[dict], None] | None = None,
+        tls_cert_sha256: str | None = None,
+        tls_ca_file: str | None = None,
     ):
         self.url = websocket_url(server_url)
         self.token_provider = token_provider
         self.handler = handler
         self.verify_tls = verify_tls
+        from service.tls import tls_context
+        self.ssl_context = tls_context(server_url, verify_tls, tls_cert_sha256, tls_ca_file)
         self.connector = connector
         self.on_auth_failure = on_auth_failure
         self.on_policy = on_policy
@@ -69,8 +73,9 @@ class WebSocketWorker:
         while not self._stop.is_set():
             try:
                 kwargs = {"additional_headers": {"Authorization": f"Bearer {self.token_provider()}"}, "open_timeout": 10}
-                if self.url.startswith("wss://") and not self.verify_tls:
-                    kwargs["ssl"] = ssl._create_unverified_context()
+                if self.url.startswith("wss://"):
+                    kwargs["ssl"] = self.ssl_context
+                    kwargs["proxy"] = None
                 with self.connector(self.url, **kwargs) as websocket:
                     self._connection = websocket
                     backoff = 1.0

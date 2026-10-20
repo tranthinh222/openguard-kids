@@ -48,7 +48,7 @@ class ProcessedCommandRepository:
 
 
 class CommandHandler:
-    TYPES = {"LOCK_NOW", "UNLOCK", "ADD_TIME", "REQUEST_REJECTED"}
+    TYPES = {"LOCK_NOW", "UNLOCK", "ADD_TIME", "REQUEST_REJECTED", "REQUEST_REVIEWED"}
     _locks = {}
     _guard = threading.Lock()
 
@@ -105,6 +105,9 @@ class CommandHandler:
                 event = {"type": "REMOTE_UNLOCKED"}
             elif command_type == "REQUEST_REJECTED":
                 event = {"type": "REQUEST_REJECTED", "response": payload.get("response")}
+            elif command_type == "REQUEST_REVIEWED":
+                event = {"type": "REQUEST_REVIEWED", "response": payload.get("response"),
+                         "subject": payload.get("subject"), "approved": payload.get("approved") is True}
             else:
                 minutes = payload.get("minutes")
                 if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 240:

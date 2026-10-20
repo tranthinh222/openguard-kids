@@ -87,6 +87,9 @@ def record_screen_usage(db, device, now, day=None):
 
 
 def cleanup_activity(db, now=None):
+    from app.models.request import ChildRequest
+    from app.models.command import DeviceCommand
+    from app.models.control_audit import ControlAudit
     now = now or utc_now()
     cutoff = now - timedelta(days=90)
     # History uploaded late must not get another full 90 days of retention;
@@ -96,5 +99,8 @@ def cleanup_activity(db, now=None):
     ))).rowcount
     db.execute(delete(ScreenUsage).where(ScreenUsage.day < cutoff.replace(tzinfo=timezone.utc).astimezone(report_timezone()).date()))
     db.execute(delete(PolicyAudit).where(PolicyAudit.created_at < cutoff))
+    db.execute(delete(ControlAudit).where(ControlAudit.created_at < cutoff))
+    db.execute(delete(ChildRequest).where(ChildRequest.created_at < cutoff))
+    db.execute(delete(DeviceCommand).where(DeviceCommand.created_at < cutoff))
     db.commit()
     return count

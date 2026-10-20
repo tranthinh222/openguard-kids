@@ -40,6 +40,9 @@ LOGGER = logging.getLogger("openguard-agent.service")
 # Settings the protected env file carries over from the project .env at install time.
 CARRIED_SETTINGS = ("OGK_SERVER_URL", "OGK_POLICY_HMAC_SECRET", "OGK_HEARTBEAT_INTERVAL_SEC", "OGK_REQUEST_TIMEOUT_SEC",
                     "OGK_USAGE_TICK_SEC", "OGK_RELOCK_DELAY_SEC", "OGK_VERIFY_TLS", "OGK_APPS_ENABLED",
+                    "OGK_TLS_CERT_SHA256", "OGK_TLS_CA_FILE",
+                    "OGK_SCHOOL_DOMAINS", "OGK_STATE_ENCRYPTION_KEY",
+                    "OGK_POLICY_OFFLINE_DAYS",
                     "OGK_APP_POLL_SEC", "OGK_DNS_ENABLED", "OGK_DNS_PORT", "OGK_DNS_UPSTREAM", "OGK_EVENT_SYNC_SEC",
                     "OGK_REPORT_TIMEZONE_OFFSET_MINUTES", "OGK_OFFLINE_CLOCK", "OGK_DNS_AUTOCONFIG",
                     "OGK_DNS_FAILURE_MODE")
@@ -102,6 +105,7 @@ if os.name == "nt":
                 harden_data_dir(data_dir())
             except Exception as exc:
                 LOGGER.error("Data folder ACL could not be applied: %s", exc)
+                return  # Do not collect private data with unverified permissions.
             from service.runtime import build_service_runtime
             try:
                 self.runtime = build_service_runtime()

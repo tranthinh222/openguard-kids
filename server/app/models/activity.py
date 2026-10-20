@@ -33,6 +33,7 @@ class ScreenUsage(Base):
 
 
 class PolicyAudit(Base):
+    source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     __tablename__ = "policy_audits"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
     child_id: Mapped[str] = mapped_column(ForeignKey("children.id", ondelete="CASCADE"), index=True)

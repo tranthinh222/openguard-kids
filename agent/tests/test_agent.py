@@ -9,7 +9,7 @@ from openguard_agent import AgentClient, AgentConfig, AgentState, StateStore
 
 
 def make_client(tmp_path: Path, handler):
-    config = AgentConfig("https://server.test", tmp_path / "state.json")
+    config = AgentConfig("https://server.test", tmp_path / "state.json", tls_cert_sha256="a" * 64)
     store = StateStore(config.state_path)
     return AgentClient(config, store, httpx.MockTransport(handler)), store
 

@@ -225,6 +225,7 @@ class AgentWindow:
         self._build()
         from tray_ui import TrayUI
         self.tray = TrayUI(self.events)
+        self.link.visible_probe = lambda: self.tray.visible
         self.tray.start()
         self._show_status_view()
         self._refresh_status()
@@ -434,6 +435,8 @@ class AgentWindow:
         FlatButton(body, 'Hôm nay / quyền riêng tư', self._show_transparency, self.f_button,
                    variant='secondary').pack(fill='x', pady=6)
         self.extra_time_button.pack(fill="x", pady=(px(8), px(0)))
+        FlatButton(body, "Báo chặn nhầm", self._report_false_block, self.f_button,
+                   variant="secondary").pack(fill="x", pady=(px(8), px(0)))
 
         self.policy_section = Collapsible(view, "Chính sách hiện tại", self.f_body, self._fit_window)
         self.policy_section.pack(pady=(px(12), px(0)))
@@ -696,6 +699,14 @@ class AgentWindow:
         self._refresh_status()
         self.link.call_async("checked", "heartbeat_now")
 
+    def _report_false_block(self) -> None:
+        from tkinter import simpledialog
+        subject = simpledialog.askstring("Báo chặn nhầm",
+                                        "Nhập tên miền hoặc tên ứng dụng (.exe), không nhập URL đầy đủ:",
+                                        parent=self.root)
+        if subject:
+            self.link.call_async("false_block", "report_false_block", subject=subject.strip())
+
     def _request_extra_time(self) -> None:
         self.extra_time_button.set_enabled(False, "Đang gửi yêu cầu...")
         self.link.call_async("extra_time", "request_extra_time", minutes=15)
@@ -774,6 +785,12 @@ class AgentWindow:
                         self._show_banner(result["message"], "warning" if result["connection"] == "offline" else "error")
                     if self.view == "status":
                         self._refresh_status()
+                elif event == "false_block":
+                    result, error = payload
+                    if error is None and result["ok"]:
+                        self._show_banner("Đã gửi báo chặn nhầm. Em chờ phụ huynh xem xét nhé.")
+                    else:
+                        self._show_banner(self._action_error(error) if error else result["message"], "error")
                 elif event == "extra_time":
                     result, error = payload
                     self.extra_time_button.set_enabled(True, "Xin thêm 15 phút")
@@ -783,7 +800,9 @@ class AgentWindow:
                         self._show_banner(self._action_error(error) if error else result["message"], "error")
                 elif event == "protection":
                     kind = payload.get("type")
-                    if kind == 'RELOCK_COUNTDOWN':
+                    if kind == 'DATA_ERASURE':
+                        self._show_banner("Phụ huynh đã yêu cầu xóa dữ liệu. Agent sẽ dừng và xóa dữ liệu trên máy.")
+                    elif kind == 'RELOCK_COUNTDOWN':
                         message = f"Em còn {payload['seconds_remaining']} giây trước khi máy bị khóa lại vì điều kiện khóa vẫn còn."
                         self._show_banner(message, 'warning')
                         if payload.get('started'):
@@ -799,7 +818,8 @@ class AgentWindow:
                                    'explicit_block': 'danh sách chặn', 'games': 'nhóm trò chơi',
                                    'social': 'nhóm mạng xã hội', 'age_inappropriate': 'nội dung không phù hợp tuổi',
                                    'unknown': 'nhóm chưa phân loại', 'education': 'nhóm học tập', 'entertainment': 'nhóm giải trí'}
-                        message = f"Đã chặn {payload['subject']} theo policy: {reasons.get(payload['reason'], payload['reason'])}."
+                        actor = "OpenGuard bảo vệ cấu hình DNS" if payload['reason'] == 'doh_endpoint' else "Phụ huynh đặt quy tắc"
+                        message = f"{actor}: chặn {payload['subject']} ({reasons.get(payload['reason'], payload['reason'])})."
                         self._show_banner(message, 'warning')
                         self.tray.notify(message)
                     elif kind == 'CONTENT_ERROR':
@@ -819,6 +839,13 @@ class AgentWindow:
                         self._show_banner(f"{prefix} Em có thêm {payload['minutes']} phút.")
                     elif kind == "REMOTE_UNLOCKED":
                         self._show_banner("Phụ huynh đã cho phép sử dụng lại máy.")
+                    elif kind == "REQUEST_REVIEWED":
+                        message = ("Phụ huynh đã ghi nhận báo chặn nhầm. Việc mở lại cần cập nhật chính sách."
+                                   if payload.get("approved") else "Phụ huynh quyết định giữ quy tắc chặn.")
+                        if payload.get("response"):
+                            message += " Lời nhắn: " + str(payload["response"])
+                        self._show_banner(message)
+                        self.tray.notify(message)
                     elif kind == "REQUEST_REJECTED":
                         reason = payload.get("response")
                         self._show_banner(

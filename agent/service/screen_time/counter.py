@@ -152,6 +152,7 @@ class ScreenTimeCounter:
         remote_locked: Callable[[], bool] = lambda: False,
         clock_ready: Callable[[], bool] = lambda: True,
         clock_sync_timeout_sec: float = 30.0,
+        policy_expired: Callable[[], bool] = lambda: False,
     ):
         self.repository = repository
         self.policy_provider = policy_provider
@@ -165,6 +166,7 @@ class ScreenTimeCounter:
         self.on_event = on_event or (lambda _event: None)
         self.remote_locked = remote_locked
         self.clock_ready = clock_ready
+        self.policy_expired = policy_expired
         self._previous = self.monotonic()
         # Allow the initial heartbeat to finish before enforcing missing time.
         # This deadline is fixed, so failed/retried heartbeats cannot extend it.
@@ -213,6 +215,10 @@ class ScreenTimeCounter:
             elif self.enforcer:
                 self.enforcer.session_is_locked()
             return TickResult(0, 0, 0, unlocked, "clock_unverified")
+        if self.policy_expired():
+            if unlocked:
+                self._enforce(EnforcementReason.POLICY_EXPIRED)
+            return TickResult(0, 0, 0, unlocked, "policy_expired")
         moment = self.now()
         usage = self.repository.get(moment.date())
         quota = policy.quota_seconds_at(moment) + usage.bonus_seconds

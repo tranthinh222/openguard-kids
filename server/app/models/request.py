@@ -4,8 +4,10 @@ from  sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, uuid4_str
+from app.core.encrypted import EncryptedText
 
 class ChildRequest(TimestampMixin, Base):
+    subject: Mapped[str | None] = mapped_column(String(253), nullable=True)
     __tablename__ = "child_requests"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
@@ -15,7 +17,7 @@ class ChildRequest(TimestampMixin, Base):
     
     requested_minutes: Mapped[int] = mapped_column(Integer, default=15, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True, nullable=False)
-    parent_response: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    parent_response: Mapped[str | None] = mapped_column(EncryptedText("request.parent_response", 255), nullable=True)
     
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     responded_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

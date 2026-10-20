@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,7 @@ def owned_device(
 @router.post("/devices/{device_id}/commands", response_model=ParentCommandResponse, status_code=status.HTTP_201_CREATED)
 async def parent_create_command(
     device_id: str,
+    request: Request,
     payload: CommandCreateRequest,
     parent: User = Depends(get_current_parent_for_write),
     db: Session = Depends(get_db),
@@ -41,7 +42,11 @@ async def parent_create_command(
     if payload.type == "ADD_TIME" and payload.minutes is None:
         raise HTTPException(status_code=422, detail="minutes is required for ADD_TIME")
 
-    command = create_command(db, device.id, payload.type, body)
+    from app.services.control_audit import record
+    command = create_command(db, device.id, payload.type, body, commit=False)
+    record(db, device.child_id, parent.id, request.client.host if request.client else None,
+           "command_created", new={"command_id": command.id, "type": payload.type, "payload": body})
+    db.commit()
     await push_command(db, command)
 
     return command

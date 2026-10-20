@@ -82,9 +82,12 @@ class AgentConfig:
     app_poll_sec: float = 2.0
     event_sync_sec: float = 5.0
     report_timezone_offset_minutes: int = 420
-    offline_clock_mode: str = 'provisional'
+    offline_clock_mode: str = 'strict'
+    policy_offline_days: int = 7
     dns_autoconfig: str = 'auto'
     dns_failure_mode: str = 'open'
+    tls_cert_sha256: str | None = None
+    tls_ca_file: str | None = None
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -108,7 +111,10 @@ class AgentConfig:
         report_offset = int(os.getenv('OGK_REPORT_TIMEZONE_OFFSET_MINUTES', '420'))
         if not -720 <= report_offset <= 840:
             raise ValueError('Invalid report timezone offset')
-        offline_clock = os.getenv('OGK_OFFLINE_CLOCK', 'provisional').lower()
+        offline_clock = os.getenv('OGK_OFFLINE_CLOCK', 'strict').lower()
+        offline_days = int(os.getenv("OGK_POLICY_OFFLINE_DAYS", "7"))
+        if not 1 <= offline_days <= 90:
+            raise ValueError("OGK_POLICY_OFFLINE_DAYS must be between 1 and 90")
         if offline_clock not in {'provisional', 'strict'}:
             raise ValueError('OGK_OFFLINE_CLOCK must be provisional or strict')
         dns_autoconfig = os.getenv('OGK_DNS_AUTOCONFIG', 'auto').lower()
@@ -133,7 +139,10 @@ class AgentConfig:
             app_poll_sec=app_poll, event_sync_sec=event_sync,
             report_timezone_offset_minutes=report_offset,
             offline_clock_mode=offline_clock,
+            policy_offline_days=offline_days,
             dns_autoconfig=dns_autoconfig, dns_failure_mode=dns_failure,
+            tls_cert_sha256=os.getenv("OGK_TLS_CERT_SHA256") or None,
+            tls_ca_file=os.getenv("OGK_TLS_CA_FILE") or None,
         )
 
     def dns_autoconfig_enabled(self, service: bool) -> bool:
@@ -150,6 +159,7 @@ class AgentConfig:
 
 @dataclass
 class AgentState:
+    erasure_pending: bool = False
     device_id: str | None = None
     access_token: str | None = None
     refresh_token: str | None = None
@@ -188,7 +198,13 @@ class StateStore:
             if not self.path.exists():
                 return AgentState()
             try:
-                return AgentState(**json.loads(self.path.read_text(encoding="utf-8")))
+                payload = json.loads(self.path.read_text(encoding="utf-8"))
+                if "format" in payload:
+                    from service.state_crypto import decrypt
+                    return AgentState(**json.loads(decrypt(self.path, payload)))
+                state = AgentState(**payload)
+                self.save(state)  # Upgrade legacy plaintext on first successful read.
+                return state
             except (OSError, json.JSONDecodeError, TypeError) as exc:
                 raise RuntimeError(f"Cannot read agent state at {self.path}: {exc}") from exc
 
@@ -200,7 +216,8 @@ class StateStore:
             )
             try:
                 with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                    json.dump(asdict(state), handle, indent=2)
+                    from service.state_crypto import encrypt
+                    json.dump(encrypt(self.path, json.dumps(asdict(state)).encode("utf-8")), handle)
                     handle.write("\n")
                     handle.flush()
                     os.fsync(handle.fileno())
@@ -239,10 +256,12 @@ class AgentClient:
         self.store = store
         # Session probes, workstation lock and process list differ between console and Service.
         self.host = host or InteractiveHost()
+        from service.tls import tls_context
         self.http = httpx.Client(
             base_url=config.server_url,
             timeout=config.request_timeout_sec,
-            verify=config.verify_tls,
+            verify=tls_context(config.server_url, config.verify_tls, config.tls_cert_sha256, config.tls_ca_file),
+            trust_env=False,
             transport=transport,
         )
         database_path = config.database_path or config.state_path.with_name("agent.db")
@@ -405,9 +424,17 @@ class AgentClient:
             enforcer=self.enforcer,
             now=self.clock_monitor.trusted_now,
             clock_ready=lambda: self.clock_monitor.ready,
+            policy_expired=self.policy_expired,
             remote_locked=self.remote_lock.active,
             on_event=report,
         )
+
+    def policy_expired(self):
+        stamp = self.store.load().last_heartbeat_at
+        if not stamp or not self.clock_monitor.ready:
+            return False
+        confirmed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        return self.clock_monitor.trusted_now() - confirmed >= timedelta(days=self.config.policy_offline_days)
 
     def request_extra_time(self, minutes: int = 15) -> dict[str, Any]:
         result = self.extra_time.request(minutes)
@@ -448,6 +475,8 @@ class AgentClient:
             token_provider=lambda: self.store.load().access_token or "",
             handler=self.command_handler,
             verify_tls=self.config.verify_tls,
+            tls_cert_sha256=self.config.tls_cert_sha256,
+            tls_ca_file=self.config.tls_ca_file,
             on_auth_failure=self._refresh_for_websocket,
             on_policy=self.accept_policy,
         )

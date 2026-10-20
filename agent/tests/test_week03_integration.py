@@ -42,7 +42,8 @@ def test_scenarios_app_domain_offline_retry_and_transparency(tmp_path):
         token = server.post('/api/v1/auth/token', json=credentials).json()['access_token']
         parent = {'Authorization': 'Bearer ' + token}
         child = server.post('/api/v1/children', headers=parent, json={'display_name': 'Demo'}).json()['id']
-        code = server.post(f'/api/v1/children/{child}/enrollment', headers=parent).json()['code']
+        code = server.post(f'/api/v1/children/{child}/enrollment', headers=parent,
+                           json={"consent": True, "privacy_notice_version": "2026-10-20-v1"}).json()['code']
         mode = ['online']
         def transport(request):
             if mode[0] == 'offline':

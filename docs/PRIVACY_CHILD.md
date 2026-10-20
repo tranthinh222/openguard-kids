@@ -54,7 +54,10 @@ Tên hồ sơ, quy tắc và một số thông tin quản lý không tự mất 
 
 ## Nếu em muốn sửa hoặc xóa thông tin thì sao?
 
-Hãy nhờ phụ huynh liên hệ người vận hành đồ án. Bản hiện tại chưa có nút xóa toàn bộ dữ liệu trên cả server và máy tính. Tắt ứng dụng hoặc ngừng ghép thiết bị không có nghĩa mọi dữ liệu cũ đã biến mất.
+Em có thể nhờ phụ huynh dùng nút **Xóa toàn bộ dữ liệu** trong hồ sơ của em.
+Dữ liệu trên server sẽ được xóa; máy của em cần kết nối lại để xóa phần còn lưu trên máy.
+Tắt ứng dụng không có nghĩa mọi dữ liệu cũ đã biến mất. Nếu một trang web hoặc ứng dụng
+bị chặn nhầm, em có thể bấm **Báo chặn nhầm** và chờ phụ huynh trả lời.
 
 Việc em đọc trang này không tự động được ghi nhận là em đã đồng ý. Em có thể đặt câu hỏi hoặc nói điều khiến em lo lắng để người lớn cùng giải thích trước khi sử dụng.
 

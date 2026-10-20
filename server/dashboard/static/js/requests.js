@@ -36,7 +36,9 @@ function requestCard(item) {
 
   const desc = document.createElement("div");
   desc.className = "mb-1";
-  desc.textContent = `Xin thêm ${item.requested_minutes} phút`;
+  desc.textContent = item.type === "false_block"
+    ? `Báo chặn nhầm: ${item.subject}`
+    : `Xin thêm ${item.requested_minutes} phút`;
   const meta = document.createElement("div");
   meta.className = "small text-secondary";
   meta.textContent = formatDateTime(item.created_at);
@@ -57,10 +59,24 @@ function requestCard(item) {
   actions.append(profile);
 
   if (item.status === "pending") {
+    const reply = document.createElement("input");
+    reply.type = "text";
+    reply.maxLength = 255;
+    reply.className = "form-control form-control-sm";
+    reply.placeholder = "Lời nhắn cho trẻ (không bắt buộc)";
+    reply.setAttribute("aria-label", "Phản hồi cho trẻ");
+    actions.append(reply);
+    if (item.type === "false_block") {
+      const policy = document.createElement("a");
+      policy.href = `/policies/${encodeURIComponent(item.child_id)}`;
+      policy.className = "btn btn-sm btn-outline-primary";
+      policy.textContent = "Mở chính sách để sửa quy tắc";
+      actions.append(policy);
+    }
     const approve = document.createElement("button");
     approve.type = "button";
     approve.className = "btn btn-sm btn-primary";
-    approve.textContent = "Duyệt";
+    approve.textContent = item.type === "false_block" ? "Ghi nhận báo chặn nhầm" : "Duyệt";
     approve.disabled = submitting.has(item.id);
     approve.addEventListener("click", async () => {
       if (submitting.has(item.id)) return;
@@ -71,12 +87,14 @@ function requestCard(item) {
         await apiWrite(
           `/api/v1/children/${encodeURIComponent(item.child_id)}/requests/${encodeURIComponent(item.id)}/approve`,
           "POST",
-          {},
+          { response: reply.value.trim() || null },
         );
         decisions.set(item.id, 'approved');
         item.status = 'approved';
         showToast(
-          `Đã duyệt thêm ${item.requested_minutes} phút cho ${item.child_name}.`,
+          item.type === "false_block"
+            ? "Đã phản hồi cho trẻ. Mở Chính sách để điều chỉnh quy tắc nếu cần."
+            : `Đã duyệt thêm ${item.requested_minutes} phút cho ${item.child_name}.`,
         );
       } catch (error) {
         showToast(error.message, true);
@@ -101,7 +119,7 @@ function requestCard(item) {
         await apiWrite(
           `/api/v1/children/${encodeURIComponent(item.child_id)}/requests/${encodeURIComponent(item.id)}/reject`,
           "POST",
-          {},
+          { response: reply.value.trim() || null },
         );
         decisions.set(item.id, 'rejected');
         item.status = 'rejected';

@@ -1,4 +1,8 @@
 from service.content_rules import CATEGORIES, domain
+import os
+
+# These resources cannot be overridden by ordinary parent block/category rules.
+SAFETY_DOMAINS = frozenset({"tongdai111.vn", "moet.gov.vn"})
 
 
 def suffix_match(host, rule):
@@ -8,6 +12,8 @@ def suffix_match(host, rule):
 class DomainMatcher:
     def __init__(self, dataset=None):
         self.mapping = {}
+        self.safety_domains = SAFETY_DOMAINS | frozenset(
+            domain(value) for value in os.getenv("OGK_SCHOOL_DOMAINS", "").split(",") if value.strip())
         if dataset:
             self.update(dataset)
 
@@ -22,6 +28,8 @@ class DomainMatcher:
 
     def decide(self, host, policy):
         host = domain(host)
+        if any(suffix_match(host, value) for value in self.safety_domains):
+            return "allow", "safety_exemption"
         rules = policy.payload.get('domains', {}) if policy else {}
         rules = rules if isinstance(rules, dict) else {}
         for action in ('allow', 'block'):

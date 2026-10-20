@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password, utc_now, verify_password
 from app.models.user import User
+from app.core.encrypted import email_lookup
 import re
 
 PASSWORD_PATTERN = re.compile(
@@ -28,12 +29,13 @@ def register_parent(db: Session, email: str, password: str) -> User:
     normalized_email = email.strip().lower()
 
 
-    existing = db.scalar(select(User).where(User.email == normalized_email))
+    existing = db.scalar(select(User).where(User.email_lookup_hash == email_lookup(normalized_email)))
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
     user = User(
         email=normalized_email,
+        email_lookup_hash=email_lookup(normalized_email),
         password_hash=hash_password(password),
         role="parent",
     )
@@ -51,7 +53,7 @@ def authenticate_parent(db: Session, email: str, password: str) -> User:
     normalized_email = email.strip().lower()
     validate_password(password)
     
-    user = db.scalar(select(User).where(User.email == normalized_email))
+    user = db.scalar(select(User).where(User.email_lookup_hash == email_lookup(normalized_email)))
 
     # Avoid revealing whether an email exists.
     if user is None:
@@ -97,7 +99,7 @@ def login_parent(db: Session, email: str, password: str) -> tuple[str, int]:
     user = authenticate_parent(db, email, password)
     token = create_access_token(
         subject=user.id,
-        token_type="parent",
+        token_type="admin" if user.role == "admin" else "parent",
         expires_minutes=settings.parent_access_token_expire_minutes,
     )
 

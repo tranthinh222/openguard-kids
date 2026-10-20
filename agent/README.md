@@ -1,5 +1,9 @@
 # OpenGuard Kids Agent
 
+> Cập nhật yêu cầu cuối: xem [hướng dẫn nâng cấp](../docs/FINAL_CONTROLS.md).
+> HTTPS cần certificate pin; Service tự dừng nếu không xác nhận được Tray hiển thị
+> trong phiên đăng nhập sau 30 giây. Sau reboot offline, mặc định đợi xác minh giờ server.
+
 ## Week 04 — Windows Service
 
 Tray = UI, Service = protection. Cài đặt, thiết kế A1–A7 và kịch bản kiểm thử:
@@ -12,7 +16,8 @@ Tray = UI, Service = protection. Cài đặt, thiết kế A1–A7 và kịch b�
 
 Không có Windows (dev): chạy runtime bằng `python agent/openguard_agent.py run`
 rồi mở Tray `python agent/agent_gui.py`. Tray không tự chạy bảo vệ nữa; đóng hay
-kill Tray không dừng bảo vệ, và menu Tray không còn mục “Thoát agent”.
+kill Tray khiến watchdog thử mở lại; nếu không hiển thị lại trong 30 giây thì Service dừng.
+Menu Tray không có mục “Thoát agent”; phụ huynh có quyền admin vẫn dừng/gỡ service được.
 
 ## Week 03
 

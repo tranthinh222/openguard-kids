@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_device, get_current_parent, get_current_parent_for_write, get_db
@@ -18,7 +18,9 @@ def agent_create_request(
     device: Device = Depends(get_current_device),
     db: Session = Depends(get_db),
 ):
-    return create_child_request(db, device.child_id, device.id, payload.type, payload.requested_minutes)
+    return create_child_request(db, device.child_id, device.id, payload.type,
+                                payload.requested_minutes if payload.type == "extra_time" else 0,
+                                payload.subject)
 
 @router.get("/children/{child_id}/requests", response_model=list[ChildRequestResponse])
 def parent_list_requests(
@@ -34,12 +36,14 @@ def parent_list_requests(
 async def approve_request(
     child_id: str,
     request_id: str,
+    request: Request,
     payload: RequestDecision,
     parent: User = Depends(get_current_parent_for_write),
     db: Session = Depends(get_db),
 ):
     child = get_owned_child(db, parent.id, child_id)
-    item, command = decide_request(db, request_id, child.id, parent.id, True, payload.response)
+    item, command = decide_request(db, request_id, child.id, parent.id, True, payload.response,
+                                   request.client.host if request.client else None)
 
     if command is not None:
         await push_command(db, command)
@@ -50,12 +54,14 @@ async def approve_request(
 async def reject_request(
     child_id: str,
     request_id: str,
+    request: Request,
     payload: RequestDecision,
     parent: User = Depends(get_current_parent_for_write),
     db: Session = Depends(get_db),
 ):
     child = get_owned_child(db, parent.id, child_id)
-    item, command = decide_request(db, request_id, child.id, parent.id, False, payload.response)
+    item, command = decide_request(db, request_id, child.id, parent.id, False, payload.response,
+                                   request.client.host if request.client else None)
 
     if command is not None:
         await push_command(db, command)

@@ -49,8 +49,23 @@ def harden_data_dir(path: Path) -> None:
     if os.name != "nt":
         os.chmod(path, 0o700)
         return
-    _run("icacls.exe", str(path), "/inheritance:r", "/grant:r",
-         "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/C", "/Q")
+    import stat
+    import win32security
+    for folder, directories, files in os.walk(path, followlinks=False):
+        for entry in [Path(folder), *(Path(folder) / name for name in directories + files)]:
+            if entry.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                raise RuntimeError('Agent data must not contain filesystem links')
+    descriptor = win32security.ConvertStringSecurityDescriptorToSecurityDescriptor(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", win32security.SDDL_REVISION_1)
+    win32security.SetNamedSecurityInfo(
+        str(path), win32security.SE_FILE_OBJECT,
+        win32security.DACL_SECURITY_INFORMATION | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
+        None, None, descriptor.GetSecurityDescriptorDacl(), None)
+    # Only the root stops inheriting. Existing data must inherit its new grants.
+    for child in path.iterdir():
+        if child.is_symlink() or getattr(child, "is_junction", lambda: False)():
+            raise RuntimeError('Agent data must not contain filesystem links')
+        _run("icacls.exe", str(child), "/reset", "/T", "/Q")
 
 
 def write_protected_env(path: Path, values: dict[str, str]) -> None:

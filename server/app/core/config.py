@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     jwt_secret: str = "dev-only-change-me-use-at-least-32-bytes"
     policy_hmac_secret: str = "dev-only-policy-secret"
+    data_encryption_key: str = ""
 
     parent_access_token_expire_minutes: int = 720
     device_access_token_expire_minutes: int = 15
@@ -36,6 +37,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def deployment_settings(self):
+        import base64
+        try:
+            key = base64.b64decode(self.data_encryption_key, validate=True)
+        except ValueError as exc:
+            raise ValueError("DATA_ENCRYPTION_KEY must be base64 encoded") from exc
+        if key and len(key) != 32:
+            raise ValueError("DATA_ENCRYPTION_KEY must encode 32 random bytes")
         if self.environment.lower() not in {'development', 'test', 'staging', 'production'}:
             raise ValueError('Unsupported ENVIRONMENT')
         if self.log_level.upper() not in {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}:
@@ -46,6 +54,8 @@ class Settings(BaseSettings):
             if getattr(self, name) <= 0:
                 raise ValueError(f'{name} must be positive')
         if self.environment.lower() in {'production', 'staging'}:
+            if not key or key == bytes(32):
+                raise ValueError("Production requires a private DATA_ENCRYPTION_KEY")
             for name in ('jwt_secret', 'policy_hmac_secret'):
                 value = getattr(self, name)
                 if len(value) < 32 or value.startswith(('dev-only', 'replace-with')):

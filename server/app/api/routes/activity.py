@@ -7,32 +7,18 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_device, get_current_parent, get_db
+from app.api.deps import get_current_device, get_current_parent, get_child_view, get_db
 from app.models.activity import ActivityEvent, PolicyAudit
 from app.models.device import Device
 from app.models.user import User
 from app.schemas.activity import EventBatch
-from app.schemas.content_rules import CATEGORIES
+from app.services.domain_categories import CATEGORY_DATASET
 from app.services.activity_service import ingest_events
 from app.services.child_service import get_owned_child
 from app.services.policy_service import get_latest_policy
 from app.services.report_service import event_filter, grouped_report, report_range, report_summary
 
 router = APIRouter()
-
-CATEGORY_DATASET = {
-    "version": 1,
-    "categories": CATEGORIES,
-    "domains": {"khanacademy.org": "education", "wikipedia.org": "education",
-                "hcmus.edu.vn": "education", "scratch.mit.edu": "education",
-                "youtube.com": "entertainment", "facebook.com": "social",
-                "instagram.com": "social", "tiktok.com": "social",
-                "roblox.com": "games", "steampowered.com": "games",
-                "age-restricted.example.test": "age_inappropriate"},
-    "default_category": "unknown",
-    "rule_priority": ["explicit_allow", "explicit_block", "category", "default_allow"],
-    "match_subdomains": True,
-}
 
 
 @router.post("/agent/events/batch")
@@ -96,7 +82,8 @@ def detail(child_id: str, kind: str, start: date | None = None, end: date | None
 
 @router.get("/agent/transparency")
 def transparency(start: date | None = None, end: date | None = None,
-                 device: Device = Depends(get_current_device), db: Session = Depends(get_db)):
+                 device: Device = Depends(get_child_view),
+                 db: Session = Depends(get_db)):
     summary = report_summary(db, device.child_id, start, end)
     _, _, lower, upper = report_range(start, end)
     events = db.scalars(select(ActivityEvent).where(*event_filter(device.child_id, lower, upper))
@@ -105,12 +92,20 @@ def transparency(start: date | None = None, end: date | None = None,
                         PolicyAudit.created_at >= lower, PolicyAudit.created_at < upper)
                         .order_by(PolicyAudit.created_at.desc()).limit(100)).all()
     policy = get_latest_policy(db, device.child_id)
+    from app.models.control_audit import ControlAudit
+    controls = db.scalars(select(ControlAudit).where(
+        ControlAudit.child_id == device.child_id, ControlAudit.created_at >= lower,
+        ControlAudit.created_at < upper).order_by(ControlAudit.created_at.desc()).limit(100)).all()
     return {"summary": summary, "policy": {"version": policy.version, "payload": policy.payload},
             "activity": [{"type": e.type, "subject": e.subject, "duration_sec": e.duration_sec,
                           "timestamp": e.effective_at.replace(tzinfo=timezone.utc), "clock_trusted": e.clock_trusted} for e in events],
             "audit": [{"timestamp": a.created_at.replace(tzinfo=timezone.utc), "actor": "parent",
+                       "actor_id": a.actor_id, "source_ip": a.source_ip,
                        "old_version": a.old_version, "new_version": a.new_version,
                        "old_payload": a.old_payload, "new_payload": a.new_payload} for a in audits],
+            "control_audit": [{"timestamp": a.created_at.replace(tzinfo=timezone.utc), "actor": "parent",
+                               "actor_id": a.actor_id, "source_ip": a.source_ip, "action": a.action,
+                               "old_value": a.old_value, "new_value": a.new_value} for a in controls],
             "privacy": {"collected": ["executable name", "domain", "duration", "timestamp"],
                         "never_collected": ["messages", "keystrokes", "screenshots", "full URLs", "window titles"],
                         "retention_days": 90},

@@ -10,7 +10,7 @@ def parent_headers(client, email="week2@example.com"):
 
 def enrolled_device(client, headers):
     child=client.post("/api/v1/children",headers=headers,json={"display_name":"Minh"}).json(); cid=child["id"]
-    code=client.post(f"/api/v1/children/{cid}/enrollment",headers=headers).json()["code"]
+    code=client.post(f"/api/v1/children/{cid}/enrollment",json={"consent": True, "privacy_notice_version": "2026-10-20-v1"}, headers=headers).json()["code"]
     device=client.post("/api/v1/agent/enroll",json={"code":code,"device_name":"PC Minh","fingerprint":"week2-fingerprint"}).json()
     return cid, device
 

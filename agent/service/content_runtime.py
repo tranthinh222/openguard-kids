@@ -127,19 +127,20 @@ class ContentRuntime:
                 monitor.close()
 
     def _sync(self):
-        next_categories, backoff = 0, self.client.config.event_sync_sec
+        next_categories, next_prune, backoff = 0, 0, self.client.config.event_sync_sec
         while not self.stop_event.is_set():
             try:
                 if not self.client.clock_monitor.ready:
                     self.stop_event.wait(.5)
                     continue
+                if self.client.clock_monitor.verified and time.monotonic() >= next_prune:
+                    self.client.events.prune(self.client.clock_monitor.trusted_now())
+                    next_prune = time.monotonic() + 3600
                 self.client.events.sync(self.client._authorized_post)
                 if time.monotonic() >= next_categories:
                     dataset = self.client.authorized_get('/api/v1/agent/domain-categories')
                     DomainMatcher(dataset)  # Reject malformed updates, keep last known good.
                     self.client.events.cache('categories', dataset)
-                    if self.client.clock_monitor.verified:  # Never prune by a provisional clock.
-                        self.client.events.prune(self.client.clock_monitor.trusted_now())
                     next_categories = time.monotonic() + 3600
                 backoff = self.client.config.event_sync_sec
             except Exception:

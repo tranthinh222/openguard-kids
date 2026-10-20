@@ -1,5 +1,10 @@
 # OpenGuard Kids Agent — Policy Manager và Screen-Time Counter
 
+Tài liệu cập nhật yêu cầu cuối:
+[Nâng cấp và cấu hình](FINAL_CONTROLS.md) · [Đối chiếu yêu cầu](REQUIREMENTS_REVIEW.md) ·
+[Checklist triển khai](IMPLEMENTATION_CHECKLIST.md) · [Quyền riêng tư](PRIVACY.md) ·
+[Threat model](THREATMODEL.md) · [AI usage](AI_USAGE.md).
+
 Tài liệu này tổng hợp hai chức năng nghiệp vụ được triển khai cho Agent trong
 Week 02. Phần giao diện Tkinter không nằm trong phạm vi tài liệu này.
 

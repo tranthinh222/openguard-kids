@@ -68,11 +68,10 @@ class DNSProcessor:
                 return self._wire(response, query, tcp)
             try:
                 policy = self.policy()
-                if host and any(host == item or host.endswith('.' + item) for item in DOH_HOSTS):
+                action, reason = self.matcher.decide(host, policy) if host else ('allow', 'local')
+                if reason != 'safety_exemption' and host and any(host == item or host.endswith('.' + item) for item in DOH_HOSTS):
                     action, reason = 'block', 'doh_endpoint'
-                else:
-                    action, reason = self.matcher.decide(host, policy) if host else ('allow', 'local')
-                if host:
+                if host and reason != 'safety_exemption':
                     subject = event_domain(host)
                     kind = 'blocked_domain' if action == 'block' else 'domain_query'
                     key = kind, subject, policy.version if policy else 0

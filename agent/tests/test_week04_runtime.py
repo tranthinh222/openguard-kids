@@ -169,7 +169,7 @@ def test_tray_watchdog_relaunches_and_trusts_only_its_own_tray():
     watchdog.pid, session[0], now[0] = 2**22 + 12345, 2, 30
     watchdog.seen(Caller(999, False, 2))  # A tray the user started is polling in session 2.
     watchdog.tick()
-    assert launched == [1, 1]
+    assert launched == [1, 1, 2]  # Untrusted polling must not suppress the trusted Tray.
 
 
 def test_trusted_idle_report_only_from_watchdog_tray(tmp_path):
@@ -233,7 +233,7 @@ def wait_for(predicate, timeout=10.0):
 def test_tray_closed_and_service_restarted_keep_protection_and_state(tmp_path, api, monkeypatch):
     monkeypatch.setattr(AgentClient, "websocket_worker",
                         lambda self: SimpleNamespace(start=lambda: None, stop=lambda: None))
-    code = api.server.post(f"/api/v1/children/{api.child}/enrollment", headers=api.parent).json()["code"]
+    code = api.server.post(f"/api/v1/children/{api.child}/enrollment", headers=api.parent, json={"consent": True, "privacy_notice_version": "2026-10-20-v1"}).json()["code"]
     config = quiet_config(tmp_path, policy_hmac_secret=api.settings.policy_hmac_secret, usage_tick_sec=0.1)
     address = str(tmp_path / "s.sock")
 

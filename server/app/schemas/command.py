@@ -6,7 +6,7 @@ from app.schemas.device import UTCDateTime
 
 ParentCommandType = Literal["LOCK_NOW", "UNLOCK", "ADD_TIME"]
 # REQUEST_REJECTED is created only by the server when a parent rejects a request.
-CommandType = Literal["LOCK_NOW", "UNLOCK", "ADD_TIME", "REQUEST_REJECTED"]
+CommandType = Literal["LOCK_NOW", "UNLOCK", "ADD_TIME", "REQUEST_REJECTED", "REQUEST_REVIEWED"]
 
 class CommandCreateRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')

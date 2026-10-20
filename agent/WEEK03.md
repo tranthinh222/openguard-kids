@@ -84,8 +84,8 @@ block trả NXDOMAIN. Không dùng HTTPS interception.
 Thứ tự: explicit allow > explicit block > category > default allow. Rule match
 hostname chính xác hoặc suffix có ranh giới dấu chấm; `notexample.com` không
 match `example.com`. Category lấy `/agent/domain-categories`, cache offline và
-refresh mỗi giờ. Có đủ 6 nhóm; dataset server hiện chỉ có 11 domain minh họa,
-không phải bộ phân loại Internet đầy đủ. Chưa fetch được dataset thì category
+refresh mỗi giờ. Có đủ 6 nhóm; dataset server v2 có 229 mục, ưu tiên Việt Nam
+(xem `server/docs/DOMAIN_CATEGORIES.md`), không phải bộ phân loại Internet đầy đủ. Chưa fetch được dataset thì category
 fallback `unknown`, các luật allow/block trực tiếp vẫn hoạt động.
 
 SafeSearch hiện hỗ trợ các host Google được liệt kê trong `dns/safesearch.py`

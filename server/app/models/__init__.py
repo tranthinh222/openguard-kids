@@ -1,4 +1,6 @@
 from app.models.user import User
+from app.models.erasure import ErasureJob
+from app.models.control_audit import ControlAudit
 from app.models.child import Child
 from app.models.device import Device
 from app.models.enrollment import EnrollmentCode

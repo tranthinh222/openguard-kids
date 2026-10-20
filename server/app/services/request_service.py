@@ -13,7 +13,8 @@ def create_child_request(
     child_id: str,
     device_id: str,
     request_type: str,
-    requested_minutes: int
+    requested_minutes: int,
+    subject: str | None = None,
 ) -> ChildRequest:
     # Avoid flooding parents with duplicate pending requests from the same device.
     existing = db.scalar(
@@ -21,6 +22,7 @@ def create_child_request(
             ChildRequest.device_id == device_id,
             ChildRequest.type == request_type,
             ChildRequest.status == "pending",
+            ChildRequest.subject == subject,
         ).order_by(ChildRequest.created_at.desc()).limit(1))
 
     if existing:
@@ -31,6 +33,7 @@ def create_child_request(
         device_id=device_id,
         type=request_type,
         requested_minutes=requested_minutes,
+        subject=subject,
         status="pending",
     )
 
@@ -56,7 +59,8 @@ def decide_request(
     child_id: str,
     parent_id: str,
     approve: bool,
-    response: str | None
+    response: str | None,
+    source_ip: str | None = None,
 ) -> tuple[ChildRequest, DeviceCommand | None]:
     item = db.scalar(select(ChildRequest).where(ChildRequest.id == request_id, ChildRequest.child_id == child_id))
     if item is None:
@@ -84,7 +88,18 @@ def decide_request(
             command = create_command(db, item.device_id, "ADD_TIME", body, commit=False)
         else:
             command = create_command(db, item.device_id, "REQUEST_REJECTED", {**body, "response": response}, commit=False)
+    elif item.type == "false_block":
+        # Approval acknowledges the complaint; policy changes remain explicit in
+        # the policy editor (especially executable hash rules).
+        command = create_command(db, item.device_id, "REQUEST_REVIEWED", {
+            "request_id": item.id, "subject": item.subject,
+            "approved": approve, "response": response,
+        }, commit=False)
 
+    from app.services.control_audit import record
+    record(db, child_id, parent_id, source_ip, "request_decided",
+           old={"request_id": item.id, "status": "pending"},
+           new={"request_id": item.id, "status": "approved" if approve else "rejected"})
     db.commit()
     db.refresh(item)
 

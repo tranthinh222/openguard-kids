@@ -1,8 +1,9 @@
 """The single protection runtime, hosted by the Windows Service or the console `run` command.
 
 Tray = UI, Service = protection: everything that enforces (screen time, app/DNS blocking,
-heartbeat, WebSocket, event sync) lives here. The tray only talks to it over local IPC, so
-closing, killing or logging out of the tray never stops protection.
+heartbeat, WebSocket, event sync) lives here. The tray talks to it over local IPC.
+On a logged-in desktop, the watchdog relaunches the tray and stops protection with
+network restoration if a trusted visible tray cannot be confirmed within 30 seconds.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ MAX_RESTARTS, RESTART_WINDOW_SEC = 5, 300.0
 GUARD_RECHECK_SEC = 30.0
 TRAY_RELAUNCH_SEC = 10.0
 TRAY_POLL_GRACE_SEC = 15.0
-PUBLIC_METHODS = {"status", "events", "heartbeat_now", "request_extra_time", "transparency", "report_idle", "enroll"}
+PUBLIC_METHODS = {"status", "events", "heartbeat_now", "request_extra_time", "report_false_block", "transparency", "report_idle", "enroll"}
 ADMIN_METHODS = {"set_sync_paused"}
 
 
@@ -100,8 +101,20 @@ class TrayWatchdog:
         self._last_attempt = -math.inf
         self._polls: dict[int | None, float] = {}
 
-    def seen(self, caller) -> None:
-        self._polls[caller.session] = self.monotonic()
+    def seen(self, caller, visible=False) -> None:
+        if visible and self.trusted(caller):
+            self._polls[caller.session] = self.monotonic()
+
+    def visibility_failed(self) -> bool:
+        current = self.session()
+        if current is None:
+            self._visibility_session = None
+            return False  # No logged-in desktop exists yet.
+        now = self.monotonic()
+        if getattr(self, "_visibility_session", None) != current:
+            self._visibility_session, self._visibility_started = current, now
+        last_seen = max(self._polls.get(current, -math.inf), self._visibility_started)
+        return now - last_seen > 30
 
     def trusted(self, caller) -> bool:
         """The launched process or its children (a venv pythonw.exe is a launcher for the real one)."""
@@ -128,8 +141,7 @@ class TrayWatchdog:
         current, mono = self.session(), self.monotonic()
         if current is None or (self._alive() and self._session_of == current):
             return
-        if mono - self._polls.get(current, -math.inf) < TRAY_POLL_GRACE_SEC:
-            return  # A tray the user started is already polling in this session.
+        # An arbitrary local client polling status isn't proof a trusted Tray exists.
         if mono - self._last_attempt < TRAY_RELAUNCH_SEC:
             return
         self._last_attempt = mono
@@ -164,7 +176,7 @@ class AgentRuntime:
         self.sync_paused = False
         self.fatal: str | None = None
         self._stop = threading.Event()
-        self._busy = threading.Lock()
+        self._busy = threading.RLock()
         self._restarts: deque[float] = deque()
         self._protection_started = False
         self._dns_healthy: bool | None = None
@@ -172,6 +184,9 @@ class AgentRuntime:
         self._guard_error_reported = False
         self._limits: dict[str, float] = {}
         self.ipc = self.lease = self._supervisor = None
+        self._next_erasure_check = 0.0
+        self.transport = transport
+        self._erasure_quiesced = False
 
     @property
     def database(self) -> Path:
@@ -214,7 +229,7 @@ class AgentRuntime:
             self._supervisor.join(timeout=10)
         self.heartbeat.stop()
         self.protection.stop()
-        self._join_workers()
+        joined = self._join_workers()
         if self.guard is not None:
             try:
                 self.guard.restore()  # Never leave the machine pointing at a stopped proxy.
@@ -222,13 +237,28 @@ class AgentRuntime:
                 LOGGER.error("Network settings could not be restored: %s", exc)
         if self.ipc is not None:
             self.ipc.stop()
+        state = self.controller.store.load()
+        if state.erasure_pending and joined:
+            from service.erasure import erase_database, check
+            from openguard_agent import AgentState
+            try:
+                erase_database(self.database)
+                # Retain only the encrypted delivery credentials until the ACK succeeds.
+                self.controller.store.save(AgentState(
+                    refresh_token=state.refresh_token, server_url=state.server_url, erasure_pending=True))
+                reply = check(self.controller.config, state.refresh_token, acknowledge=True, transport=self.transport)
+                if reply.get("acknowledged") is True:
+                    self.controller.store.save(AgentState())
+            except Exception:
+                LOGGER.error("Local erasure/acknowledgement incomplete; restart agent to retry", exc_info=True)
         if self.lease is not None:
             self.lease.close()
         LOGGER.info("OpenGuard runtime stopped")
 
     def _enrolled(self) -> bool:
         try:
-            return self.controller.state().enrolled
+            state = self.controller.state()
+            return state.enrolled and not state.erasure_pending
         except RuntimeError:
             return False
 
@@ -257,6 +287,23 @@ class AgentRuntime:
                 LOGGER.exception("Supervisor tick failed")
 
     def supervise_once(self) -> None:
+        state = self.controller.store.load()
+        if state.erasure_pending:
+            self._process_erasure(state)
+            return
+        if state.refresh_token and self.monotonic() >= self._next_erasure_check:
+            self._next_erasure_check = self.monotonic() + 30
+            from service.erasure import check
+            try:
+                if check(self.controller.config, state.refresh_token, transport=self.transport).get("erase_local") is True:
+                    with self._busy:
+                        if self.controller.store.load().refresh_token != state.refresh_token:
+                            return
+                        self.controller.store.update(erasure_pending=True)
+                    self._publish({"type": "DATA_ERASURE"})
+                    return
+            except Exception:
+                LOGGER.debug("Privacy deletion check unavailable")
         if self._busy.acquire(blocking=False):  # Skip while an enrollment swaps the workers.
             try:
                 if self._enrolled():
@@ -270,8 +317,50 @@ class AgentRuntime:
                 self._busy.release()
         if self.tray is not None:
             self.tray.tick()
+            if self.tray.visibility_failed():
+                LOGGER.error("No visible trusted Tray for 30 seconds; stopping protection")
+                self._stop.set()  # Voluntary stop: do not trigger SCM crash recovery.
+                return
         if self.guard is not None:
             self._guard_tick()
+
+    def _process_erasure(self, state):
+        with self._busy:
+            self._process_erasure_locked(state)
+
+    def _process_erasure_locked(self, state):
+        """Retry ACK while offline, without restarting collectors or recreating usage."""
+        from service.erasure import erase_database, check
+        from openguard_agent import AgentState
+        if not self._erasure_quiesced:
+            self.heartbeat.stop()
+            self.protection.stop()
+            if not self._join_workers():
+                LOGGER.error("Waiting for workers to stop before erasure")
+                return
+            if self.guard:
+                try:
+                    self.guard.restore()
+                except Exception:
+                    LOGGER.error("Network restoration failed; backup retained", exc_info=True)
+            if self.ipc:
+                self.ipc.stop()
+                self.ipc = None
+            erase_database(self.database)
+            self.controller.store.save(AgentState(
+                refresh_token=state.refresh_token, server_url=state.server_url, erasure_pending=True))
+            self._erasure_quiesced = True
+            self._next_erasure_check = 0
+        if self.monotonic() < self._next_erasure_check:
+            return
+        self._next_erasure_check = self.monotonic() + 30
+        try:
+            reply = check(self.controller.config, state.refresh_token, acknowledge=True, transport=self.transport)
+            if reply.get("acknowledged") is True:
+                self.controller.store.save(AgentState())
+                self._stop.set()
+        except Exception:
+            LOGGER.warning("Erasure ACK unavailable; retrying in 30 seconds")
 
     def _restart_protection(self) -> None:
         mono = self.monotonic()
@@ -322,8 +411,14 @@ class AgentRuntime:
     # --------------------------------------------------------------------- IPC
 
     def handle(self, method: str, params: dict, caller):
+        with self._busy:
+            if self.controller.store.load().erasure_pending and method not in {"status", "events"}:
+                raise IPCError("erasing", "Đang xóa dữ liệu theo yêu cầu của phụ huynh.")
+            return self._handle(method, params, caller)
+
+    def _handle(self, method: str, params: dict, caller):
         if self.tray is not None and method == "status" and params.get("tray"):
-            self.tray.seen(caller)
+            self.tray.seen(caller, visible=params.get("visible") is True)
         if method in ADMIN_METHODS and not caller.admin:
             raise PermissionError("Cần quyền quản trị viên (phụ huynh) cho thao tác này.")
         if method not in PUBLIC_METHODS | ADMIN_METHODS:
@@ -384,6 +479,17 @@ class AgentRuntime:
         self._limit("extra_time", 10)
         try:
             self.controller.request_extra_time(minutes)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "message": describe_error(exc)}
+
+    def ipc_report_false_block(self, params, _caller) -> dict:
+        self._limit("false_block", 10)
+        subject = params.get("subject")
+        if not isinstance(subject, str) or not 1 <= len(subject) <= 253:
+            raise ValueError("Enter a domain or executable filename")
+        try:
+            self.controller.report_false_block(subject)
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "message": describe_error(exc)}
@@ -458,6 +564,12 @@ def build_console_runtime(config: AgentConfig | None = None) -> AgentRuntime:
         from service.windows.network import NetworkGuard
         guard = NetworkGuard(config.database_path or config.state_path.with_name("agent.db"),
                              upstream=config.dns_upstream)
-    return AgentRuntime(config, network_guard=guard)
+    tray = None
+    if os.name == "nt":
+        import subprocess
+        def launch(_session, command, cwd, hidden):
+            return subprocess.Popen(command, cwd=cwd, creationflags=0x08000000).pid
+        tray = TrayWatchdog(launch=launch)
+    return AgentRuntime(config, network_guard=guard, tray=tray)
 
 

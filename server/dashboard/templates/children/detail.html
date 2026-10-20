@@ -37,6 +37,13 @@ endblock %} {% block content %}
         <p class="text-secondary small">
           Mã gồm 8 ký tự và hết hạn sau 10 phút.
         </p>
+        <div class="small mb-3">
+          <p>Agent ghi nhận tên ứng dụng, mã SHA-256, tên miền, thời lượng sử dụng và sự kiện chặn.
+            Không ghi phím bấm, ảnh màn hình, nội dung tin nhắn hay URL đầy đủ.
+            Dữ liệu hoạt động được giữ tối đa 90 ngày. Trẻ có thể xem dữ liệu tại Hôm nay / quyền riêng tư.</p>
+          <label><input id="enrollment-consent" type="checkbox">
+            Tôi là phụ huynh/người giám hộ, đã giải thích cho trẻ và đồng ý ghép thiết bị với các thông tin trên.</label>
+        </div>
         <button
           id="create-enrollment-button"
           class="btn btn-primary w-100"
@@ -113,6 +120,14 @@ endblock %} {% block content %}
         </div>
       </article>
     </div>
+  </div>
+</section>
+<section class="mt-4 card border-danger">
+  <div class="card-body">
+    <h2 class="h5">Xóa dữ liệu của trẻ</h2>
+    <p>Gỡ hồ sơ và dữ liệu trên server. Agent sẽ xóa dữ liệu cục bộ khi kết nối lại.
+      Thiết bị offline chưa thể xác nhận đã xóa. Thao tác này không thể hoàn tác.</p>
+    <button id="delete-child-data" type="button" class="btn btn-outline-danger">Xóa toàn bộ dữ liệu</button>
   </div>
 </section>
 {% endblock %}

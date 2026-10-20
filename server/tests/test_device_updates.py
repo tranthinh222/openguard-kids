@@ -19,7 +19,7 @@ def test_enrollment_heartbeat_and_timeout_update_all_parent_views(client):
     child_id = child.json()["id"]
     devices_url = f"/api/v1/children/{child_id}/devices"
     assert client.get(devices_url, headers=headers).json() == []
-    code = client.post(f"/api/v1/children/{child_id}/enrollment", headers=headers)
+    code = client.post(f"/api/v1/children/{child_id}/enrollment", json={"consent": True, "privacy_notice_version": "2026-10-20-v1"}, headers=headers)
     assert code.status_code == 201
     enrolled = client.post("/api/v1/agent/enroll", json={
         "code": code.json()["code"], "device_name": "Laptop An", "fingerprint": "test-device-fingerprint",
@@ -72,8 +72,8 @@ def test_enrollment_status_tracks_exact_code_and_checks_ownership(client, db_ses
     headers = parent_headers(client, "pairing@example.com")
     child_id = client.post("/api/v1/children", headers=headers, json={"display_name": "An"}).json()["id"]
     base = f"/api/v1/children/{child_id}/enrollment"
-    first = client.post(base, headers=headers).json()
-    second = client.post(base, headers=headers).json()
+    first = client.post(base, json={"consent": True, "privacy_notice_version": "2026-10-20-v1"}, headers=headers).json()
+    second = client.post(base, json={"consent": True, "privacy_notice_version": "2026-10-20-v1"}, headers=headers).json()
     first_url = f"{base}/{first['enrollment_id']}"
     second_url = f"{base}/{second['enrollment_id']}"
     assert client.get(first_url, headers=headers).json() == {"enrollment_id": first["enrollment_id"], "status": "pending"}

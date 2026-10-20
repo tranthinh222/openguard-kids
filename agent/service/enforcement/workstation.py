@@ -23,6 +23,7 @@ class EnforcementReason(StrEnum):
     SCHEDULE_DISALLOWED = "schedule_disallowed"
     REMOTE_LOCK = "remote_lock"
     CLOCK_UNVERIFIED = "clock_unverified"
+    POLICY_EXPIRED = "policy_expired"
 
 
 def _windows_lock() -> bool:

@@ -276,12 +276,28 @@ export async function initChildDetailPage() {
   );
 
   const button = document.getElementById("create-enrollment-button");
+  document.getElementById("delete-child-data").addEventListener("click", async () => {
+    if (!window.confirm("Xóa vĩnh viễn hồ sơ và dữ liệu của trẻ? Agent offline sẽ xóa khi kết nối lại.")) return;
+    try {
+      const result = await apiWrite(`/api/v1/children/${encodedId}`, "DELETE");
+      window.alert(result.local_cleanup_pending
+        ? "Đã xóa trên server. Cần cho Agent kết nối lại để hoàn tất xóa dữ liệu cục bộ."
+        : "Đã xóa dữ liệu.");
+      window.location.assign("/children");
+    } catch (error) {
+      window.alert(error.message);
+    }
+  });
   button.addEventListener("click", async () => {
     setButtonBusy(button, true, "Đang tạo mã...");
     try {
+      if (!document.getElementById("enrollment-consent").checked) {
+        throw new Error("Vui lòng đọc và xác nhận thông báo trước khi ghép thiết bị.");
+      }
       const enrollment = await apiWrite(
         `/api/v1/children/${encodedId}/enrollment`,
         "POST",
+        { consent: true, privacy_notice_version: "2026-10-20-v1" },
       );
       activeEnrollmentId = enrollment.enrollment_id;
       renderEnrollment(enrollment.code, enrollment.expires_at);

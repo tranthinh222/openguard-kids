@@ -52,7 +52,8 @@ def get_latest_policy(db: Session, child_id: str) -> Policy:
 
     return policy
 
-def update_policy(db: Session, child_id: str, payload: PolicyPayload, actor_id: str | None = None) -> Policy:
+def update_policy(db: Session, child_id: str, payload: PolicyPayload, actor_id: str | None = None,
+                  source_ip: str | None = None) -> Policy:
     previous = get_latest_policy(db, child_id)
     version = previous.version + 1
     data = payload.model_dump(mode="json")
@@ -64,7 +65,7 @@ def update_policy(db: Session, child_id: str, payload: PolicyPayload, actor_id: 
     )
 
     db.add(policy)
-    db.add(PolicyAudit(child_id=child_id, actor_id=actor_id, old_version=previous.version,
+    db.add(PolicyAudit(child_id=child_id, actor_id=actor_id, source_ip=source_ip, old_version=previous.version,
                        new_version=version, old_payload=previous.payload, new_payload=data))
     try:
         db.commit()

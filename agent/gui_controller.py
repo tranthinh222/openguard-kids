@@ -117,6 +117,8 @@ def format_remaining(result: TickResult | None) -> str:
         return "—"
     if result.reason == "no_policy":
         return "Chưa có chính sách"
+    if result.reason == "policy_expired":
+        return "Chính sách offline đã hết hạn. Cần kết nối lại máy chủ."
     if result.reason in {"clock_sync_pending", "clock_unverified"}:
         return "Đang chờ xác minh giờ máy chủ"
     if result.reason == "remote_lock":
@@ -199,6 +201,15 @@ class AgentController:
             return PolicyRepository(path).active()
         except (OSError, ValueError, sqlite3.Error):
             return None
+
+    def report_false_block(self, subject: str) -> dict:
+        from service.content_rules import domain, process_name
+        subject = process_name(subject) if subject.lower().endswith(".exe") else domain(subject)
+        client = AgentClient(self.config, self.store, clock_monitor=self.clock_monitor, host=self.host, transport=self.transport)
+        try:
+            return client._authorized_post("/api/v1/agent/requests", {"type": "false_block", "subject": subject})
+        finally:
+            client.close()
 
     def request_extra_time(self, minutes: int = 15) -> dict:
         client = AgentClient(self.config, self.store, clock_monitor=self.clock_monitor, host=self.host, transport=self.transport)

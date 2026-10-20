@@ -17,7 +17,7 @@ LOGGER = logging.getLogger("openguard-agent.ipc")
 # SYSTEM and Administrators: full. Interactive users: read + write data only; omitting
 # FILE_APPEND_DATA (= FILE_CREATE_PIPE_INSTANCE) stops a child from squatting the pipe name.
 # Network logons are denied outright.
-PIPE_SDDL = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;IU)(D;;GA;;;NU)"
+PIPE_SDDL = "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;IU)"
 PIPE_REJECT_REMOTE_CLIENTS = 0x00000008
 FILE_FLAG_FIRST_PIPE_INSTANCE = 0x00080000
 MAX_WORKERS = 8
@@ -114,9 +114,17 @@ class NamedPipeServer:
         import win32file
         import win32pipe
         import win32security
+        import win32api
+        import win32con
+        token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+        try:
+            sid = win32security.ConvertSidToStringSid(
+                win32security.GetTokenInformation(token, win32security.TokenUser)[0])
+        finally:
+            token.Close()
         attributes = win32security.SECURITY_ATTRIBUTES()
         attributes.SECURITY_DESCRIPTOR = win32security.ConvertStringSecurityDescriptorToSecurityDescriptor(
-            PIPE_SDDL, win32security.SDDL_REVISION_1)
+            PIPE_SDDL + f"(A;;GA;;;{sid})", win32security.SDDL_REVISION_1)
         open_mode = win32pipe.PIPE_ACCESS_DUPLEX | win32file.FILE_FLAG_OVERLAPPED
         if self._first:
             open_mode |= FILE_FLAG_FIRST_PIPE_INSTANCE
@@ -138,6 +146,13 @@ class NamedPipeServer:
         import winerror
         pipe = self._pending
         while not self._stop.is_set():
+            if pipe is None:
+                try:
+                    pipe = self._create()
+                except RuntimeError:
+                    LOGGER.exception("IPC pipe could not be recreated")
+                    self._stop.wait(1)
+                    continue
             overlapped = pywintypes.OVERLAPPED()
             overlapped.hEvent = win32event.CreateEvent(None, True, False, None)
             try:
@@ -145,22 +160,21 @@ class NamedPipeServer:
                 while not connected and not self._stop.is_set():
                     connected = win32event.WaitForSingleObject(overlapped.hEvent, 500) == win32event.WAIT_OBJECT_0
             except pywintypes.error as exc:
-                LOGGER.warning("IPC connect failed: %s", exc)
-                connected = False
+                connected = exc.winerror == winerror.ERROR_PIPE_CONNECTED
+                if not connected:
+                    LOGGER.warning("IPC connect failed: %s", exc)
             if self._stop.is_set():
                 win32file.CloseHandle(pipe)
+                pipe = None
                 break
             if connected and self._slots.acquire(blocking=False):
                 threading.Thread(target=self._serve_client, args=(pipe,), daemon=True,
                                  name="openguard-ipc-client").start()
             else:
                 win32file.CloseHandle(pipe)
-            try:
-                pipe = self._create()
-            except RuntimeError:
-                LOGGER.exception("IPC pipe could not be recreated")
-                self._stop.wait(1)
-                continue
+            pipe = None  # Closed or owned by the worker; never reuse on create failure.
+        if pipe is not None:
+            win32file.CloseHandle(pipe)
 
     @staticmethod
     def _io(pipe, operation, timeout: float):

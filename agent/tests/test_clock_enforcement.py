@@ -91,7 +91,7 @@ def test_gui_heartbeat_and_protection_share_clock(tmp_path, monkeypatch):
     # This clock unit test must never start host process monitoring or bind DNS.
     from unittest.mock import MagicMock
     monkeypatch.setattr(gui_controller, 'ContentRuntime', MagicMock())
-    config = AgentConfig("https://server.test", tmp_path / "state.json", policy_hmac_secret="secret")
+    config = AgentConfig("https://server.test", tmp_path / "state.json", policy_hmac_secret="secret", tls_cert_sha256="a" * 64)
     controller = AgentController(config)
     controller.store.save(AgentState(device_id="d", access_token="a", refresh_token="r"))
     controller.clock_monitor.local_now = lambda: datetime(2040, 1, 1, tzinfo=timezone.utc)
@@ -144,7 +144,7 @@ def test_gui_heartbeat_and_protection_share_clock(tmp_path, monkeypatch):
 def test_heartbeat_add_time_uses_server_day_before_ack(tmp_path):
     from openguard_agent import StateStore
 
-    config = AgentConfig("https://server.test", tmp_path / "state.json")
+    config = AgentConfig("https://server.test", tmp_path / "state.json", tls_cert_sha256="a" * 64)
     store = StateStore(config.state_path)
     store.save(AgentState(device_id="d", access_token="a", refresh_token="r"))
     monitor = ClockMonitor(tmp_path / "agent.db",

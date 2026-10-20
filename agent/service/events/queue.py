@@ -104,3 +104,14 @@ class EventQueue:
         with self.connect() as db:
             db.execute('DELETE FROM events WHERE julianday(created_at)<julianday(?)', (cutoff,))
             db.execute('DELETE FROM app_usage_daily WHERE date<?', (cutoff[:10],))
+            tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in ('usage_daily', 'warning_state', 'grace_state'):
+                if table in tables:
+                    db.execute(f'DELETE FROM {table} WHERE date<?', (cutoff[:10],))
+            for table in ('security_events', 'clock_events'):
+                if table in tables:
+                    db.execute(f'DELETE FROM {table} WHERE julianday(created_at)<julianday(?)', (cutoff,))
+            if 'policies' in tables:
+                db.execute('DELETE FROM policies WHERE is_active=0 AND julianday(activated_at)<julianday(?)', (cutoff,))
+            db.execute("DELETE FROM content_cache WHERE key LIKE '%:transparency' "
+                       "AND json_extract(payload, '$.date') < ?", (cutoff[:10],))
