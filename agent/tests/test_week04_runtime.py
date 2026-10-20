@@ -266,3 +266,36 @@ def test_tray_closed_and_service_restarted_keep_protection_and_state(tmp_path, a
         wait_for(lambda: IPCClient(address).call("status")["tick"])
     finally:
         runtime.stop()
+
+
+def test_run_explains_unwritable_data_dir_instead_of_traceback(tmp_path, monkeypatch, caplog):
+    import openguard_agent
+    locked = tmp_path / "ProgramData" / "OpenGuardKids"
+    locked.mkdir(parents=True)
+    locked.chmod(0o500)  # what the installer's ACL means for a non-admin console
+    try:
+        if os.access(locked, os.W_OK):
+            pytest.skip("running as root: permissions are not enforced")
+        monkeypatch.setenv("OGK_STATE_PATH", str(locked / "agent-state.json"))
+        monkeypatch.delenv("OGK_DATABASE_PATH", raising=False)
+        monkeypatch.setenv("OGK_IPC_ADDRESS", str(tmp_path / "none.sock"))
+        monkeypatch.setattr(sys, "argv", ["openguard_agent.py", "run"])
+        assert openguard_agent.main() == 1
+        assert "Không ghi được thư mục dữ liệu" in caplog.text and "Run as Administrator" in caplog.text
+    finally:
+        locked.chmod(0o700)
+
+
+def test_run_refuses_when_service_already_running(tmp_path, monkeypatch, caplog):
+    import openguard_agent
+    address = str(tmp_path / "s.sock")
+    runtime = AgentRuntime(quiet_config(tmp_path), host=FAKE_HOST, ipc_address=address)
+    runtime.start()
+    try:
+        monkeypatch.setenv("OGK_STATE_PATH", str(tmp_path / "other" / "agent-state.json"))
+        monkeypatch.setenv("OGK_IPC_ADDRESS", address)
+        monkeypatch.setattr(sys, "argv", ["openguard_agent.py", "run"])
+        assert openguard_agent.main() == 1
+        assert "đang chạy trên máy này" in caplog.text
+    finally:
+        runtime.stop()
