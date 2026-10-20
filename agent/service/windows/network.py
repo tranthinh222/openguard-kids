@@ -138,7 +138,11 @@ class PowerShellBackend:
         self.run("; ".join(script))
 
     def remove_firewall(self) -> None:
-        self.run(f"Remove-NetFirewallRule -Group '{FIREWALL_GROUP}' -ErrorAction SilentlyContinue")
+        # Filtering an enumeration yields an empty, successful pipeline when the
+        # group is already gone. Do not hide access/provider/removal errors.
+        self.run("Get-NetFirewallRule -ErrorAction Stop | "
+                 f"Where-Object {{ $_.Group -eq '{FIREWALL_GROUP}' }} | "
+                 "Remove-NetFirewallRule -ErrorAction Stop")
 
     def read_policy(self, path: str, name: str):
         import winreg

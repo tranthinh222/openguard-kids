@@ -166,7 +166,13 @@ def remove(_args) -> int:
     from service.windows.network import NetworkGuard
     config = AgentConfig.from_env()
     NetworkGuard(config.database_path or config.state_path.with_name("agent.db"), upstream=config.dns_upstream).restore()
-    win32serviceutil.RemoveService(SERVICE_NAME)
+    try:
+        win32serviceutil.RemoveService(SERVICE_NAME)
+    except Exception as exc:
+        # An administrator may already have removed it using sc.exe delete.
+        # Network restoration above must still be possible in that case.
+        if getattr(exc, 'winerror', None) != 1060:
+            raise
     print("Đã gỡ dịch vụ và khôi phục cấu hình DNS/firewall/trình duyệt.")
     return 0
 
