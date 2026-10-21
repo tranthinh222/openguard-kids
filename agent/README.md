@@ -32,6 +32,12 @@ Bỏ bước tạo venv nếu đã có. `pywin32`, `psutil`, DNS, Tray và thư 
 
 Thứ tự ưu tiên: môi trường process → `C:\ProgramData\OpenGuardKids\agent.env` → `agent/.env` → mặc định. Installer lưu cấu hình được bảo vệ vào ProgramData. Sửa `agent/.env` không tự thay bản service đã cài; người quản trị sửa file ProgramData rồi restart service. Không thay signing secret tùy tiện trên hệ thống đang dùng.
 
+`OGK_SERVER_URL` được cấu hình rõ sẽ ưu tiên hơn URL lưu lúc ghép đôi; URL đã
+lưu chỉ dùng khi không cấu hình biến này. Khi chuyển HTTP sang HTTPS trên cùng
+server, giữ token và cập nhật URL/CA/pin rồi restart, không cần xóa state hoặc ghép lại.
+Lỗi cấu hình TLS được báo và thử lại, không dùng crash/recovery để sửa cấu hình.
+Trong lúc client chưa khởi tạo được, luồng bảo vệ chưa sẵn sàng; phải sửa cấu hình.
+
 HTTPS kiểm tra CA, hostname, TLS ≥1.2 và certificate pin trước khi gửi token. Lấy pin từ chứng chỉ đã xác minh qua kênh quản trị; cập nhật khi đổi chứng chỉ. Không tắt xác minh TLS để xử lý lỗi pin. HTTP chỉ dành cho lab.
 
 ## Cài, chạy và ghép đôi
@@ -70,6 +76,13 @@ Restart-Service OpenGuardKids
 ```
 
 Khi dừng, runtime phục hồi DNS/firewall/browser từ backup. Lệnh remove thử phục hồi lại cả khi service từng crash, sau đó gỡ đăng ký dịch vụ. Không xóa ProgramData trước bước này vì chứa backup mạng. Gỡ service không đồng nghĩa xóa dữ liệu hồ sơ trên server; dùng chức năng xóa hồ sơ khi agent còn có thể kết nối để hoàn tất xóa cục bộ.
+
+Khi dừng service bình thường, Tray nhận trạng thái shutdown qua IPC, gỡ icon và
+thoát. Runtime theo dõi cả launcher Python và process con, chờ thoát rồi terminate/kill
+nếu cần; không tìm và đóng tất cả Python trên máy. Watchdog không mở lại Tray sau
+khi đã bắt đầu cleanup. Tray tồn dư từ phiên bản cũ cần đóng một lần trước khi
+khởi động bản mới. Cơ chế này dành cho stop/restart có cleanup; crash cưỡng bức
+toàn process service cần được kiểm chứng riêng.
 
 Nếu dừng lâu, xem `sc.exe queryex OpenGuardKids` và log trong ProgramData. Không chạy hai runtime cùng lúc hoặc kill tùy tiện trong lúc đang phục hồi mạng.
 

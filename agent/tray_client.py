@@ -38,6 +38,10 @@ class ServiceLink:
     def poll_once(self) -> None:
         try:
             status = self.client.call("status", tray=True, visible=bool(self.visible_probe()))
+            if status.get("stopping"):
+                self.post("service_status", status)
+                self.stop()
+                return
             batch = self.client.call("events", after=self.cursor)
             if batch["seq"] < self.cursor:
                 self.cursor = -1  # The service restarted; its numbering began again.

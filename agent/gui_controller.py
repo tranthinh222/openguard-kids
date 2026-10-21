@@ -293,9 +293,19 @@ class ProtectionWorker:
         self._stop.set()
 
     def _run(self, stop: threading.Event) -> None:
-        client = AgentClient(self.controller.config, self.controller.store, on_command_event=self.on_event,
-                             clock_monitor=self.controller.clock_monitor, host=self.controller.host,
-                             transport=self.controller.transport)
+        while not stop.is_set():
+            try:
+                client = AgentClient(self.controller.config, self.controller.store, on_command_event=self.on_event,
+                                     clock_monitor=self.controller.clock_monitor, host=self.controller.host,
+                                     transport=self.controller.transport)
+                break
+            except (ValueError, OSError) as exc:
+                # Invalid URL/pin or unreadable CA is an actionable configuration error,
+                # not a worker crash that SCM recovery can fix.
+                self.on_event({"type": "PROTECTION_ERROR", "error": exc})
+                stop.wait(30)
+        else:
+            return
         websocket = None
         lease = None
         content = ContentRuntime(client, self.on_event)

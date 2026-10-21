@@ -100,6 +100,60 @@ class TrayWatchdog:
         self.pid = self._created = self._session_of = None
         self._last_attempt = -math.inf
         self._polls: dict[int | None, float] = {}
+        self._lifecycle = threading.RLock()
+        self._stopped = False
+        self._owned = {}
+
+    def _remember_tree(self) -> None:
+        """Retain process identities, including children that later become orphaned."""
+        import psutil
+        if self.pid is not None:
+            try:
+                root = psutil.Process(self.pid)
+                if root.create_time() == self._created:
+                    self._owned[self.pid] = root
+            except psutil.NoSuchProcess:
+                pass
+        for pid, process in list(self._owned.items()):
+            try:
+                if not process.is_running():
+                    self._owned.pop(pid, None)
+                    continue
+                for child in process.children(recursive=True):
+                    self._owned[child.pid] = child
+            except psutil.NoSuchProcess:
+                self._owned.pop(pid, None)
+            except psutil.Error as exc:
+                LOGGER.warning("Cannot inspect owned Tray process %s: %s", pid, exc)
+
+    def stop(self) -> None:
+        """Allow graceful UI exit, then reap only processes launched by this watchdog."""
+        import psutil
+        with self._lifecycle:
+            self._stopped = True
+            self._remember_tree()
+            processes = list(self._owned.values())
+            # The IPC status remains available while the UI removes its icon and exits.
+            _, alive = psutil.wait_procs(processes, timeout=3)
+            for process in reversed(alive):
+                try:
+                    process.terminate()  # psutil checks PID reuse before signalling.
+                except psutil.NoSuchProcess:
+                    pass
+                except psutil.Error as exc:
+                    LOGGER.error("Cannot stop owned Tray %s: %s", process.pid, exc)
+            _, alive = psutil.wait_procs(alive, timeout=2)
+            for process in alive:
+                try:
+                    process.kill()
+                except psutil.NoSuchProcess:
+                    pass
+                except psutil.Error as exc:
+                    LOGGER.error("Cannot kill owned Tray %s: %s", process.pid, exc)
+            _, alive = psutil.wait_procs(alive, timeout=2)
+            self._owned = {process.pid: process for process in alive}
+            if alive:
+                LOGGER.error("Tray processes still running: %s", list(self._owned))
 
     def seen(self, caller, visible=False) -> None:
         if visible and self.trusted(caller):
@@ -138,6 +192,13 @@ class TrayWatchdog:
             return False
 
     def tick(self) -> None:
+        with self._lifecycle:
+            if self._stopped:
+                return
+            self._remember_tree()
+            self._tick()
+
+    def _tick(self) -> None:
         current, mono = self.session(), self.monotonic()
         if current is None or (self._alive() and self._session_of == current):
             return
@@ -157,6 +218,7 @@ class TrayWatchdog:
             except psutil.Error:
                 return
             self.pid, self._session_of = pid, current
+            self._remember_tree()
             LOGGER.info("Tray started in session %s (pid %s)", current, pid)
 
 
@@ -199,7 +261,7 @@ class AgentRuntime:
         self.lease = RuntimeLock(self.database, suffix=".host.lock")
         try:
             state = self.controller.state()
-            if state.server_url:
+            if state.server_url and not self.config.server_url_explicit:
                 self.controller.set_server_url(state.server_url)
         except (RuntimeError, ValueError) as exc:
             LOGGER.error("Agent state unreadable: %s", exc)
@@ -235,6 +297,11 @@ class AgentRuntime:
                 self.guard.restore()  # Never leave the machine pointing at a stopped proxy.
             except Exception as exc:
                 LOGGER.error("Network settings could not be restored: %s", exc)
+        if self.tray is not None:
+            try:
+                self.tray.stop()
+            except Exception:
+                LOGGER.exception("Tray cleanup failed")
         if self.ipc is not None:
             self.ipc.stop()
         state = self.controller.store.load()
@@ -432,6 +499,8 @@ class AgentRuntime:
         self._limits[name] = mono + seconds
 
     def ipc_status(self, _params, caller) -> dict:
+        if self._stop.is_set():
+            return {"stopping": True}
         try:
             state, state_error = self.controller.state(), None
         except RuntimeError as exc:

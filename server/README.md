@@ -30,6 +30,49 @@ Nếu cần phục vụ máy khác trong LAN, đổi host thành `0.0.0.0` và c
 
 ## Cấu hình và HTTPS
 
+Tạo chứng chỉ lab bằng script có sẵn, chạy từ **thư mục gốc repository**:
+
+```powershell
+.\.venv\Scripts\python.exe tools/create_lab_certs.py --ip 127.0.0.1 --dns localhost --out lab-certs
+# Nếu agent khác máy, thêm IP LAN thật của server, ví dụ:
+# .\.venv\Scripts\python.exe tools/create_lab_certs.py --ip 127.0.0.1 --ip 192.168.1.10 --dns localhost --out lab-certs
+```
+
+Chọn một lệnh phù hợp, không chạy cả hai với cùng thư mục. Script cần `cryptography`
+(đã có trong requirements), tạo CA riêng và chứng chỉ server có SAN tương ứng,
+hiệu lực mặc định 365 ngày (`--days` để đổi). `--ip`/`--dns` có thể lặp nhiều lần.
+Thư mục output phải chưa tồn tại; script không ghi đè hoặc tự thay chứng chỉ đang dùng.
+
+Output gồm `ca.pem`, `ca-key.pem`, `server.pem`, `server-key.pem`,
+`server-sha256.txt`. Script in `OGK_TLS_CA_FILE` và `OGK_TLS_CERT_SHA256` để
+điền phía agent. Với agent khác máy, sao chép **chỉ `ca.pem`** và sửa đường dẫn
+CA thành đường dẫn tuyệt đối trên máy agent; fingerprint giữ nguyên.
+Service đã cài đọc cấu hình ProgramData trước `agent/.env`.
+
+Khóa riêng không có mật khẩu để server khởi động tự động; giới hạn quyền thư mục
+cho người quản trị/server. `ca-key.pem` chỉ dùng cấp chứng chỉ, không phân phối.
+Output mặc định và tên `*-key.pem` được Git bỏ qua. Không commit chứng chỉ/khóa
+sinh ra ở đường dẫn tùy chỉnh. Script không tự import CA, đổi `.env` hay restart service.
+
+Chạy HTTPS từ `server/`:
+
+```powershell
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-certfile ../lab-certs/server.pem --ssl-keyfile ../lab-certs/server-key.pem
+```
+
+Đặt `WEB_COOKIE_SECURE=true`, `ALLOWED_HOSTS` đúng hostname/IP. Agent dùng URL
+`https://<địa chỉ trong SAN>:8000`, `OGK_VERIFY_TLS=true`, CA và pin vừa tạo.
+Để browser tin chứng chỉ, import **CA công khai do chính bạn tạo** vào kho
+Trusted Root của tài khoản dùng dashboard, ví dụ tại root repository:
+
+```powershell
+Import-Certificate -FilePath .\lab-certs\ca.pem -CertStoreLocation Cert:\CurrentUser\Root
+```
+
+Kiểm tra `/ready`, heartbeat và WebSocket; browser không được cảnh báo chứng chỉ.
+Nếu tạo bộ mới, CA và pin cũng mới: cần phân phối lại. Không tắt xác minh TLS để
+bỏ qua lỗi. CA lab chỉ phù hợp môi trường thử nghiệm được quản lý.
+
 | Biến | Vai trò |
 | --- | --- |
 | `ENVIRONMENT` | development/test/staging/production |

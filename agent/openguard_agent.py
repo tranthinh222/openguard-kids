@@ -88,6 +88,7 @@ class AgentConfig:
     dns_failure_mode: str = 'open'
     tls_cert_sha256: str | None = None
     tls_ca_file: str | None = None
+    server_url_explicit: bool = False
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -125,6 +126,7 @@ class AgentConfig:
             raise ValueError('Invalid DNS port, app polling or event sync interval')
         return cls(
             server_url=os.getenv("OGK_SERVER_URL", "http://127.0.0.1:8000").rstrip("/"),
+            server_url_explicit=bool(os.getenv("OGK_SERVER_URL")),
             state_path=state_path,
             heartbeat_interval_sec=interval,
             request_timeout_sec=timeout,

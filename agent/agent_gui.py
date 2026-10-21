@@ -740,6 +740,11 @@ class AgentWindow:
                     self.root.deiconify()
                     self._show_transparency()
                 elif event == 'service_status':
+                    if payload.get("stopping"):
+                        self.link.stop()
+                        self.tray.stop()
+                        self.root.destroy()
+                        return
                     self._on_service_status(payload)
                 elif event == 'service_down':
                     self.service, self.service_error = None, self._action_error(payload)

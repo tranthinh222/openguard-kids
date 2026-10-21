@@ -10,6 +10,8 @@ server/data/*.db-wal
 .pytest_cache/
 .coverage
 htmlcov/
+lab-certs/
+*-key.pem
 
 QuanLyMayTinhTreEm.pdf
 .vscode/
